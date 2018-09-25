@@ -26,11 +26,21 @@ class Controller:
     example, '/dev/ttyACM2' or for Windows, something like 'COM3'.
     """
 
-    def __init__(self, tty='/dev/ttyACM0', device=0x0C):
+    def __init__(self, tty='/dev/ttyACM0', device=0x0C, safe_close: bool = True):
+        """
+        :param tty:
+        :param device:
+        :param safe_close: If `True`, tells the Maestro to stop sending servo signals before closing the connection.
+        """
+
         # Open the command port
         self.usb = serial.Serial(tty)
+
         # Command lead-in and device number are sent for each Pololu serial command.
         self.pololu_cmd = chr(0xAA) + chr(device)
+
+        self.safe_close = safe_close
+
         # Track target position for each servo. The function isMoving() will
         # use the Target vs Current servo position to determine if movement is
         # occurring.  Up to 24 servos on a Maestro, (0-23). Targets start at 0.
@@ -48,6 +58,11 @@ class Controller:
     def close(self):
         """Cleanup by closing USB serial port."""
         print('Closing Maestro connection.')
+
+        if self.safe_close:
+            for channel in range(24):
+                self.set_target(channel, 0)
+
         self.usb.close()
 
     def send_cmd(self, cmd):
@@ -97,7 +112,7 @@ class Controller:
         msb = (target >> 7) & 0x7F  # shift 7 and take next 7 bits for msb
         cmd = chr(0x04) + chr(chan) + chr(lsb) + chr(msb)
         self.send_cmd(cmd)
-        # Record Target value
+        # Record target value
         self.targets[chan] = target
 
     def set_speed(self, chan, speed):
@@ -131,7 +146,7 @@ class Controller:
         the Target parameter of setTarget.
         This is not reading the true servo position, but the last target position sent
         to the servo. If the Speed is set to below the top speed of the servo, then
-        the position result will align well with the acutal servo position, assuming
+        the position result will align well with the actual servo position, assuming
         it is not stalled or slowed.
         """
         cmd = chr(0x10) + chr(chan)
