@@ -29,6 +29,8 @@ def main():
             5
         )
 
+        print('Max RPM: {}\n'.format(left_motor.hard_max_rpm))
+
         while True:
             rpm = input('Enter RPM: ')
             try:
