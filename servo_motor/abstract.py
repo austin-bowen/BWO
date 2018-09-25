@@ -96,3 +96,6 @@ class ContinuousServoMotor(ServoMotor):
 
     def set_speed(self, speed):
         self.controller.set_pwm_us(self.map_speed_to_pwm_us(speed))
+
+    def stop(self):
+        self.set_speed(0)
