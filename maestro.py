@@ -138,7 +138,7 @@ class Controller:
 
         if self.safe_close:
             for channel in range(24):
-                self.set_target(channel, 0)
+                self.stop_channel(channel)
 
         self._usb.close()
 
@@ -208,6 +208,13 @@ class Controller:
         """
         self.mins[chan] = min
         self.maxs[chan] = max
+
+    def stop_channel(self, channel: int):
+        """
+        Sets the target of the specified channel to 0, causing the Maestro to stop sending PWM signals on that channel.
+        :param channel: PWM channel to stop sending PWM signals to.
+        """
+        self.set_target(channel, 0)
 
     def stop_script(self):
         """Causes the script to stop, if it is currently running."""
