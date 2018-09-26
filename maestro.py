@@ -18,6 +18,7 @@ def micro_maestro_not_supported(method):
     """
     Methods using this decorator will raise a MicroMaestroNotSupportedError if the Controller is for the Micro Maestro.
     """
+
     @wraps(method)
     def wrapper(self, *args, **kwargs):
         __doc__ = method.__doc__
@@ -54,31 +55,47 @@ class Controller:
     TODO: Automatic serial reconnect.
     """
 
-    # Serial command headers
-    POLOLU_PROTOCOL = 0xAA
-    DEFAULT_DEVICE_NUMBER = 0x0C
+    class SerialCommands:
+        # Headers
+        POLOLU_PROTOCOL = 0xAA
+        DEFAULT_DEVICE_NUMBER = 0x0C
 
-    # Serial commands
-    SET_TARGET = 0x04
-    SET_SPEED = 0x07
-    SET_ACCELERATION = 0x09
-    GET_POSITION = 0x10
-    GET_ERRORS = 0x21  # TODO: Implement this
-    GO_HOME = 0x22
-    STOP_SCRIPT = 0x24
-    RESTART_SCRIPT_AT_SUBROUTINE = 0x27
-    RESTART_SCRIPT_AT_SUBROUTINE_WITH_PARAMETER = 0x28
-    GET_SCRIPT_STATUS = 0x2E  # TODO: Implement this
-    # - Not available on the Micro
-    SET_PWM = 0x0A
-    GET_MOVING_STATE = 0x13
-    SET_MULTIPLE_TARGETS = 0x1F
+        # Commands
+        SET_TARGET = 0x04
+        SET_SPEED = 0x07
+        SET_ACCELERATION = 0x09
+        GET_POSITION = 0x10
+        GET_ERRORS = 0x21
+        GO_HOME = 0x22
+        STOP_SCRIPT = 0x24
+        RESTART_SCRIPT_AT_SUBROUTINE = 0x27
+        RESTART_SCRIPT_AT_SUBROUTINE_WITH_PARAMETER = 0x28
+        GET_SCRIPT_STATUS = 0x2E
+        # - Not available on the Micro
+        SET_PWM = 0x0A
+        GET_MOVING_STATE = 0x13
+        SET_MULTIPLE_TARGETS = 0x1F
+
+    class Errors:
+        """
+        See the documentation for descriptions of these errors:
+        https://www.pololu.com/docs/0J40/4.e
+        """
+        SERIAL_SIGNAL_ERROR = 1 << 0
+        SERIAL_OVERRUN_ERROR = 1 << 1
+        SERIAL_BUFFER_FULL_ERROR = 1 << 2
+        SERIAL_CRC_ERROR = 1 << 3
+        SERIAL_PROTOCOL_ERROR = 1 << 4
+        SERIAL_TIMEOUT_ERROR = 1 << 5
+        SCRIPT_STACK_ERROR = 1 << 6
+        SCRIPT_CALL_STACK_ERROR = 1 << 7
+        SCRIPT_PROGRAM_COUNTER_ERROR = 1 << 8
 
     def __init__(
             self,
             is_micro: bool,
             tty: str = '/dev/ttyACM0',
-            device: int = DEFAULT_DEVICE_NUMBER,
+            device: int = SerialCommands.DEFAULT_DEVICE_NUMBER,
             safe_close: bool = True
     ):
         """
@@ -94,7 +111,7 @@ class Controller:
         self._usb = serial.Serial(tty)
 
         # Command lead-in and device number are sent for each Pololu serial command.
-        self._pololu_cmd = bytes((self.POLOLU_PROTOCOL, device))
+        self._pololu_cmd = bytes((self.SerialCommands.POLOLU_PROTOCOL, device))
 
         self.safe_close = safe_close
 
@@ -127,12 +144,38 @@ class Controller:
 
         self._closed = True
 
+    def get_errors(self):
+        """
+        Use this command to examine the errors that the Maestro has detected. Section 4.e lists the specific errors that
+        can be detected by the Maestro. The error register is sent as a two-byte response immediately after the command
+        is received, then all the error bits are cleared. For most applications using serial control, it is a good idea
+        to check errors continuously and take appropriate action if errors occur.
+
+        See the Errors class for error values that can be and-ed with the result of this method to determine exactly
+        which errors have occurred.
+
+        :return: 0 if no errors have occurred since the last check; non-zero if an error has occurred.
+        """
+        self.send_cmd(bytes((self.SerialCommands.GET_ERRORS,)))
+        lsb = ord(self._usb.read())
+        msb = ord(self._usb.read())
+        return (msb << 8) | lsb
+
     def go_home(self):
         """
         Sends all servos and outputs to their home positions, just as if an error had occurred. For servos and outputs
         set to “Ignore”, the position will be unchanged.
         """
-        self.send_cmd(bytes((self.GO_HOME,)))
+        self.send_cmd(bytes((self.SerialCommands.GO_HOME,)))
+
+    def script_is_running(self):
+        """
+        :return: True if a script is running; False otherwise.
+        """
+        self.send_cmd(bytes((self.SerialCommands.GET_SCRIPT_STATUS,)))
+
+        # Maestro returns 0x00 if a script is running
+        return self._usb.read()[0] == 0
 
     def send_cmd(self, cmd: Union[bytes, bytearray]):
         """Send a Pololu command out the serial port."""
@@ -151,7 +194,7 @@ class Controller:
         on_time_lsb, on_time_msb = _get_lsb_msb(on_time)
         period = int(round(48 * period_us))  # The command uses 1/48th us intervals
         period_lsb, period_msb = _get_lsb_msb(period)
-        self.send_cmd(bytes((self.SET_PWM, on_time_lsb, on_time_msb, period_lsb, period_msb)))
+        self.send_cmd(bytes((self.SerialCommands.SET_PWM, on_time_lsb, on_time_msb, period_lsb, period_msb)))
 
     def set_range(self, chan, min, max):
         """
@@ -168,7 +211,7 @@ class Controller:
 
     def stop_script(self):
         """Causes the script to stop, if it is currently running."""
-        self.send_cmd(bytes((self.STOP_SCRIPT)))
+        self.send_cmd(bytes((self.SerialCommands.STOP_SCRIPT,)))
 
     def get_min(self, chan):
         """Return minimum channel range value."""
@@ -197,7 +240,7 @@ class Controller:
             target = self.maxs[chan]
 
         lsb, msb = _get_lsb_msb(target)
-        self.send_cmd(bytes((self.SET_TARGET, chan, lsb, msb)))
+        self.send_cmd(bytes((self.SerialCommands.SET_TARGET, chan, lsb, msb)))
         # Record target value
         self.targets[chan] = target
 
@@ -246,7 +289,7 @@ class Controller:
                 # If there is more than one target in the block, set them all at once with the
                 # "set multiple targets" command.
                 else:
-                    cmd = bytearray((self.SET_MULTIPLE_TARGETS, target_count, first_channel))
+                    cmd = bytearray((self.SerialCommands.SET_MULTIPLE_TARGETS, target_count, first_channel))
                     for target in target_block:
                         cmd += bytes(_get_lsb_msb(target))
                     self.send_cmd(cmd)
@@ -259,7 +302,7 @@ class Controller:
         of 1 will take 1 minute, and a speed of 60 would take 1 second. Speed of 0 is unrestricted.
         """
         lsb, msb = _get_lsb_msb(speed)
-        self.send_cmd(bytes((self.SET_SPEED, chan, lsb, msb)))
+        self.send_cmd(bytes((self.SerialCommands.SET_SPEED, chan, lsb, msb)))
 
     def set_accel(self, chan, accel):
         """
@@ -269,7 +312,7 @@ class Controller:
         A value of 1 will take the servo about 3s to move between 1ms to 2ms range.
         """
         lsb, msb = _get_lsb_msb(accel)
-        self.send_cmd(bytes((self.SET_ACCELERATION, chan, lsb, msb)))
+        self.send_cmd(bytes((self.SerialCommands.SET_ACCELERATION, chan, lsb, msb)))
 
     def get_position(self, chan: int):
         """
@@ -281,10 +324,10 @@ class Controller:
         the position result will align well with the actual servo position, assuming
         it is not stalled or slowed.
         """
-        self.send_cmd(bytes((self.GET_POSITION, chan)))
+        self.send_cmd(bytes((self.SerialCommands.GET_POSITION, chan)))
         lsb = ord(self._usb.read())
         msb = ord(self._usb.read())
-        return (msb << 8) + lsb
+        return (msb << 8) | lsb
 
     def is_moving(self, chan):
         """
@@ -310,7 +353,7 @@ class Controller:
 
         :raises NotSupportedError: method is called while connected to a Micro Maestro.
         """
-        self.send_cmd(bytes((self.GET_MOVING_STATE,)))
+        self.send_cmd(bytes((self.SerialCommands.GET_MOVING_STATE,)))
         if self._usb.read() == chr(0):
             return False
         else:
@@ -327,7 +370,7 @@ class Controller:
 
         :param subroutine: The subroutine number to run.
         """
-        self.send_cmd(bytes((self.RESTART_SCRIPT_AT_SUBROUTINE, subroutine)))
+        self.send_cmd(bytes((self.SerialCommands.RESTART_SCRIPT_AT_SUBROUTINE, subroutine)))
 
     def run_script_subroutine_with_parameter(self, subroutine: int, parameter: int):
         """
@@ -339,20 +382,16 @@ class Controller:
         :param parameter: The integer parameter to pass to the subroutine (range: 0 to 16383).
         :return:
         """
-        if range < 0 or range > 16383:
+        if parameter < 0 or parameter > 16383:
             raise ValueError('parameter "{}" is out of range; it must be in the range [0, 16383].'.format(parameter))
 
         parameter_lsb, parameter_msb = _get_lsb_msb(parameter)
         self.send_cmd(bytes((
-            self.RESTART_SCRIPT_AT_SUBROUTINE_WITH_PARAMETER,
+            self.SerialCommands.RESTART_SCRIPT_AT_SUBROUTINE_WITH_PARAMETER,
             subroutine,
             parameter_lsb,
             parameter_msb
         )))
-
-    def stop_script(self):
-        """Stop the current Maestro script."""
-        self.send_cmd(b'\x24')
 
 
 class MicroMaestroNotSupportedError(Exception):
