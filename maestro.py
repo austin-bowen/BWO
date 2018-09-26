@@ -8,7 +8,33 @@ Cloned from: https://github.com/FRC4564/Maestro/
 These functions provide access to many of the Maestro's capabilities using the Pololu serial protocol.
 """
 
+from functools import wraps
+from typing import Union
+
 import serial
+
+
+def micro_maestro_not_supported(method):
+    """
+    Methods using this decorator will raise a MicroMaestroNotSupportedError if the Controller is for the Micro Maestro.
+    """
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        __doc__ = method.__doc__
+        if self.is_micro:
+            raise MicroMaestroNotSupportedError(
+                'The method "{}" is not supported by the Micro Maestro.'.format(method.__name__)
+            )
+
+        return method(self, *args, **kwargs)
+
+    return wrapper
+
+
+def _get_lsb_msb(value: int):
+    lsb = value & 0x7F  # 7 bits for least significant byte
+    msb = (value >> 7) & 0x7F  # shift 7 and take next 7 bits for msb
+    return lsb, msb
 
 
 class Controller:
@@ -24,20 +50,51 @@ class Controller:
     assumes.  If two or more controllers are connected to different serial
     ports, or you are using a Windows OS, you can provide the tty port.  For
     example, '/dev/ttyACM2' or for Windows, something like 'COM3'.
+
+    TODO: Automatic serial reconnect.
     """
 
-    def __init__(self, tty='/dev/ttyACM0', device=0x0C, safe_close: bool = True):
+    # Serial command headers
+    POLOLU_PROTOCOL = 0xAA
+    DEFAULT_DEVICE_NUMBER = 0x0C
+
+    # Serial commands
+    SET_TARGET = 0x04
+    SET_SPEED = 0x07
+    SET_ACCELERATION = 0x09
+    GET_POSITION = 0x10
+    GET_ERRORS = 0x21  # TODO: Implement this
+    GO_HOME = 0x22
+    STOP_SCRIPT = 0x24
+    RESTART_SCRIPT_AT_SUBROUTINE = 0x27
+    RESTART_SCRIPT_AT_SUBROUTINE_WITH_PARAMETER = 0x28
+    GET_SCRIPT_STATUS = 0x2E  # TODO: Implement this
+    # - Not available on the Micro
+    SET_PWM = 0x0A
+    GET_MOVING_STATE = 0x13
+    SET_MULTIPLE_TARGETS = 0x1F
+
+    def __init__(
+            self,
+            is_micro: bool,
+            tty: str = '/dev/ttyACM0',
+            device: int = DEFAULT_DEVICE_NUMBER,
+            safe_close: bool = True
+    ):
         """
+        :param is_micro: Whether or not the device is the Micro Maestro, which lacks some functionality.
         :param tty:
         :param device:
         :param safe_close: If `True`, tells the Maestro to stop sending servo signals before closing the connection.
         """
 
+        self.is_micro = is_micro
+
         # Open the command port
-        self.usb = serial.Serial(tty)
+        self._usb = serial.Serial(tty)
 
         # Command lead-in and device number are sent for each Pololu serial command.
-        self.pololu_cmd = chr(0xAA) + chr(device)
+        self._pololu_cmd = bytes((self.POLOLU_PROTOCOL, device))
 
         self.safe_close = safe_close
 
@@ -49,6 +106,8 @@ class Controller:
         self.mins = [0] * 24
         self.maxs = [0] * 24
 
+        self._closed = False
+
     def __enter__(self):
         return self
 
@@ -57,17 +116,42 @@ class Controller:
 
     def close(self):
         """Cleanup by closing USB serial port."""
-        print('Closing Maestro connection.')
+        if self._closed:
+            return
 
         if self.safe_close:
             for channel in range(24):
                 self.set_target(channel, 0)
 
-        self.usb.close()
+        self._usb.close()
 
-    def send_cmd(self, cmd):
+        self._closed = True
+
+    def go_home(self):
+        """
+        Sends all servos and outputs to their home positions, just as if an error had occurred. For servos and outputs
+        set to “Ignore”, the position will be unchanged.
+        """
+        self.send_cmd(bytes((self.GO_HOME,)))
+
+    def send_cmd(self, cmd: Union[bytes, bytearray]):
         """Send a Pololu command out the serial port."""
-        self.usb.write(bytes(self.pololu_cmd + cmd, 'latin-1'))
+        self._usb.write(self._pololu_cmd + cmd)
+
+    @micro_maestro_not_supported
+    def set_pwm(self, on_time_us: Union[int, float], period_us: Union[int, float]):
+        """
+        Sets the PWM output to the specified on time and period.
+        This command is not available on the Micro Maestro.
+
+        :param on_time_us: PWM on-time in microseconds.
+        :param period_us: PWM period in microseconds.
+        """
+        on_time = int(round(48 * on_time_us))  # The command uses 1/18th us intervals
+        on_time_lsb, on_time_msb = _get_lsb_msb(on_time)
+        period = int(round(48 * period_us))  # The command uses 1/48th us intervals
+        period_lsb, period_msb = _get_lsb_msb(period)
+        self.send_cmd(bytes((self.SET_PWM, on_time_lsb, on_time_msb, period_lsb, period_msb)))
 
     def set_range(self, chan, min, max):
         """
@@ -75,12 +159,16 @@ class Controller:
         from accidentally moving outside known safe parameters. A setting of 0
         allows unrestricted movement.
 
-        ***Note that the Maestro itself is configured to limit the range of servo travel
+        Note that the Maestro itself is configured to limit the range of servo travel
         which has precedence over these values.  Use the Maestro Control Center to configure
         ranges that are saved to the controller.  Use setRange for software controllable ranges.
         """
         self.mins[chan] = min
         self.maxs[chan] = max
+
+    def stop_script(self):
+        """Causes the script to stop, if it is currently running."""
+        self.send_cmd(bytes((self.STOP_SCRIPT)))
 
     def get_min(self, chan):
         """Return minimum channel range value."""
@@ -108,12 +196,60 @@ class Controller:
         if 0 < self.maxs[chan] < target:
             target = self.maxs[chan]
 
-        lsb = target & 0x7F  # 7 bits for least significant byte
-        msb = (target >> 7) & 0x7F  # shift 7 and take next 7 bits for msb
-        cmd = chr(0x04) + chr(chan) + chr(lsb) + chr(msb)
-        self.send_cmd(cmd)
+        lsb, msb = _get_lsb_msb(target)
+        self.send_cmd(bytes((self.SET_TARGET, chan, lsb, msb)))
         # Record target value
         self.targets[chan] = target
+
+    def set_targets(self, targets: dict):
+        """
+        Set multiple channel targets at once.
+
+        The Micro Maestro does not support the "set multiple targets" command, so this method will simply set each
+        channel target one at a time.
+
+        The other Maestro models, however, support the option of setting the targets for a block of channels using a
+        single command.  This method will use that "set multiple targets" command when possible, for maximum efficiency.
+
+        :param targets: A dict mapping channels to their targets.
+        """
+        if self.is_micro:
+            for channel, target in targets.items():
+                self.set_target(channel, target)
+
+        # Non-Micro Maestros support sending blocks of target values with one command
+        else:
+            # Use targets to build a structure of target blocks
+            channels = sorted(targets.keys())
+            prev_channel = first_channel = channels[0]
+            target = targets[first_channel]
+            # Structure: {channelM: [targetM, targetM+1, ..., targetN], ...}
+            target_blocks = {first_channel: [target]}
+            for channel in channels[1:]:
+                target = targets[channel]
+
+                if channel - 1 == prev_channel:
+                    target_blocks[first_channel].append(target)
+                else:
+                    first_channel = channel
+                    target_blocks[first_channel] = [target]
+
+                prev_channel = channel
+
+            for first_channel, target_block in target_blocks.items():
+                target_count = len(target_block)
+
+                # If there is only one target in the block, use the single "set target" command
+                if target_count == 1:
+                    self.set_target(first_channel, target_block[0])
+
+                # If there is more than one target in the block, set them all at once with the
+                # "set multiple targets" command.
+                else:
+                    cmd = bytearray((self.SET_MULTIPLE_TARGETS, target_count, first_channel))
+                    for target in target_block:
+                        cmd += bytes(_get_lsb_msb(target))
+                    self.send_cmd(cmd)
 
     def set_speed(self, chan, speed):
         """
@@ -122,10 +258,8 @@ class Controller:
         For the standard 1ms pulse width change to move a servo between extremes, a speed
         of 1 will take 1 minute, and a speed of 60 would take 1 second. Speed of 0 is unrestricted.
         """
-        lsb = speed & 0x7F  # 7 bits for least significant byte
-        msb = (speed >> 7) & 0x7F  # shift 7 and take next 7 bits for msb
-        cmd = chr(0x07) + chr(chan) + chr(lsb) + chr(msb)
-        self.send_cmd(cmd)
+        lsb, msb = _get_lsb_msb(speed)
+        self.send_cmd(bytes((self.SET_SPEED, chan, lsb, msb)))
 
     def set_accel(self, chan, accel):
         """
@@ -134,12 +268,10 @@ class Controller:
         Valid values are from 0 to 255. 0=unrestricted, 1 is slowest start.
         A value of 1 will take the servo about 3s to move between 1ms to 2ms range.
         """
-        lsb = accel & 0x7F  # 7 bits for least significant byte
-        msb = (accel >> 7) & 0x7F  # shift 7 and take next 7 bits for msb
-        cmd = chr(0x09) + chr(chan) + chr(lsb) + chr(msb)
-        self.send_cmd(cmd)
+        lsb, msb = _get_lsb_msb(accel)
+        self.send_cmd(bytes((self.SET_ACCELERATION, chan, lsb, msb)))
 
-    def get_position(self, chan):
+    def get_position(self, chan: int):
         """
         Get the current position of the device on the specified channel
         The result is returned in a measure of quarter-microseconds, which mirrors
@@ -149,10 +281,9 @@ class Controller:
         the position result will align well with the actual servo position, assuming
         it is not stalled or slowed.
         """
-        cmd = chr(0x10) + chr(chan)
-        self.send_cmd(cmd)
-        lsb = ord(self.usb.read())
-        msb = ord(self.usb.read())
+        self.send_cmd(bytes((self.GET_POSITION, chan)))
+        lsb = ord(self._usb.read())
+        msb = ord(self._usb.read())
         return (msb << 8) + lsb
 
     def is_moving(self, chan):
@@ -170,31 +301,60 @@ class Controller:
                 return True
         return False
 
+    @micro_maestro_not_supported
     def get_moving_state(self):
         """
         Have all servo outputs reached their targets? This is useful only if Speed and/or
         Acceleration have been set on one or more of the channels. Returns True or False.
         Not available with Micro Maestro.
+
+        :raises NotSupportedError: method is called while connected to a Micro Maestro.
         """
-        cmd = chr(0x13)
-        self.send_cmd(cmd)
-        if self.usb.read() == chr(0):
+        self.send_cmd(bytes((self.GET_MOVING_STATE,)))
+        if self._usb.read() == chr(0):
             return False
         else:
             return True
 
-    def run_script_sub(self, sub_number):
+    def run_script_subroutine(self, subroutine: int):
         """
-        Run a Maestro Script subroutine in the currently active script. Scripts can
-        have multiple subroutines, which get numbered sequentially from 0 on up. Code your
-        Maestro subroutine to either infinitely loop, or just end (return is not valid).
+        Starts the script running at a location specified by the subroutine number argument. The subroutines are
+        numbered in the order they are defined in your script, starting with 0 for the first subroutine. The first
+        subroutine is sent as 0x00 for this command, the second as 0x01, etc. To find the number for a particular
+        subroutine, click the "View Compiled Code..." button and look at the list below. Subroutines used this way
+        should not end with the RETURN command, since there is no place to return to — instead, they should contain
+        infinite loops or end with a QUIT command.
+
+        :param subroutine: The subroutine number to run.
         """
-        cmd = chr(0x27) + chr(sub_number)
-        # can pass a param with command 0x28
-        # cmd = chr(0x28) + chr(subNumber) + chr(lsb) + chr(msb)
-        self.send_cmd(cmd)
+        self.send_cmd(bytes((self.RESTART_SCRIPT_AT_SUBROUTINE, subroutine)))
+
+    def run_script_subroutine_with_parameter(self, subroutine: int, parameter: int):
+        """
+        This method is just like the "run_script_subroutine" method, except it loads a parameter on to the stack before
+        starting the subroutine. Since data bytes can only contain 7 bits of data, the parameter must be between
+        0 and 16383.
+
+        :param subroutine: The subroutine number to run.
+        :param parameter: The integer parameter to pass to the subroutine (range: 0 to 16383).
+        :return:
+        """
+        if range < 0 or range > 16383:
+            raise ValueError('parameter "{}" is out of range; it must be in the range [0, 16383].'.format(parameter))
+
+        parameter_lsb, parameter_msb = _get_lsb_msb(parameter)
+        self.send_cmd(bytes((
+            self.RESTART_SCRIPT_AT_SUBROUTINE_WITH_PARAMETER,
+            subroutine,
+            parameter_lsb,
+            parameter_msb
+        )))
 
     def stop_script(self):
         """Stop the current Maestro script."""
-        cmd = chr(0x24)
-        self.send_cmd(cmd)
+        self.send_cmd(b'\x24')
+
+
+class MicroMaestroNotSupportedError(Exception):
+    """Raised when calling a method that is not supported by the Micro Maestro."""
+    pass
