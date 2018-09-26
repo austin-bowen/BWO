@@ -53,6 +53,7 @@ class Controller:
     example, '/dev/ttyACM2' or for Windows, something like 'COM3'.
 
     TODO: Automatic serial reconnect.
+    TODO: Change targets from 1/4 us intervals to 1 us intervals.
     """
 
     class SerialCommands:
@@ -124,6 +125,9 @@ class Controller:
         self.maxs = [0] * 24
 
         self._closed = False
+
+    def __del__(self):
+        self.close()
 
     def __enter__(self):
         return self
