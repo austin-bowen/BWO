@@ -98,19 +98,21 @@ class Maestro:
             is_micro: bool,
             tty: str = '/dev/ttyACM0',
             device: int = SerialCommands.DEFAULT_DEVICE_NUMBER,
-            safe_close: bool = True
+            safe_close: bool = True,
+            timeout: float = None
     ):
         """
         :param is_micro: Whether or not the device is the Micro Maestro, which lacks some functionality.
         :param tty:
         :param device:
         :param safe_close: If `True`, tells the Maestro to stop sending servo signals before closing the connection.
+        :param timeout: Read timeout in seconds.
         """
 
         self.is_micro = is_micro
 
         # Open the command port
-        self._usb = serial.Serial(tty)
+        self._usb = serial.Serial(tty, timeout=timeout)
 
         # Command lead-in and device number are sent for each Pololu serial command.
         self._pololu_cmd = bytes((self.SerialCommands.POLOLU_PROTOCOL, device))
@@ -134,6 +136,18 @@ class Maestro:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
+
+    def _read(self, byte_count: int) -> bytes:
+        """
+        :raises TimeoutError: Connection timed out waiting to read the specified number of bytes.
+        """
+        assert byte_count > 0
+        data = self._usb.read(byte_count)
+        if len(data) != byte_count:
+            raise TimeoutError(
+                'Tried to read {} bytes, but only got {}.'.format(byte_count, len(data))
+            )
+        return data
 
     def close(self):
         """Cleanup by closing USB serial port."""
@@ -159,9 +173,10 @@ class Maestro:
         which errors have occurred.
 
         :return: 0 if no errors have occurred since the last check; non-zero if an error has occurred.
+        :raises TimeoutError: Connection timed out.
         """
         self.send_cmd(bytes((self.SerialCommands.GET_ERRORS,)))
-        data = self._usb.read(2)
+        data = self._read(2)
         return data[0] << 8 | data[1]
 
     def go_home(self):
@@ -174,11 +189,12 @@ class Maestro:
     def script_is_running(self):
         """
         :return: True if a script is running; False otherwise.
+        :raises TimeoutError: Connection timed out.
         """
         self.send_cmd(bytes((self.SerialCommands.GET_SCRIPT_STATUS,)))
 
         # Maestro returns 0x00 if a script is running
-        return self._usb.read()[0] == 0
+        return self._read(1)[0] == 0
 
     def send_cmd(self, cmd: Union[bytes, bytearray]):
         """Send a Pololu command out the serial port."""
@@ -341,9 +357,11 @@ class Maestro:
         to the servo. If the Speed is set to below the top speed of the servo, then
         the position result will align well with the actual servo position, assuming
         it is not stalled or slowed.
+
+        :raises TimeoutError: Connection timed out.
         """
         self.send_cmd(bytes((self.SerialCommands.GET_POSITION, chan)))
-        data = self._usb.read(2)
+        data = self._read(2)
         return (data[0] << 8 | data[1]) / 4
 
     def is_moving(self, channel: int):
@@ -368,9 +386,10 @@ class Maestro:
         movements to finish before moving on to the next step of your program.
 
         :returns: True if the Maestro reports that servos are still moving; False otherwise.
+        :raises TimeoutError: Connection timed out.
         """
         self.send_cmd(bytes((self.SerialCommands.GET_MOVING_STATE,)))
-        return self._usb.read()[0] == 1
+        return self._read(1)[0] == 1
 
     def run_script_subroutine(self, subroutine: int):
         """
