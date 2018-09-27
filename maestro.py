@@ -1,20 +1,21 @@
 """
 Maestro Servo Controller
 
-Support for the Pololu Maestro line of servo controllers.
+Support for the Pololu Maestro line of servo controllers:
+https://www.pololu.com/docs/0J40
 
-Cloned from: https://github.com/FRC4564/Maestro/
+Originally cloned from: https://github.com/FRC4564/Maestro/
 
 These functions provide access to many of the Maestro's capabilities using the Pololu serial protocol.
 """
 
 from functools import wraps
-from typing import Union
+from typing import Mapping, MutableSequence, Union
 
 import serial
 
 
-def micro_maestro_not_supported(method):
+def _micro_maestro_not_supported(method):
     """
     Methods using this decorator will raise a MicroMaestroNotSupportedError if the Controller is for the Micro Maestro.
     """
@@ -33,6 +34,7 @@ def micro_maestro_not_supported(method):
 
 
 def _get_lsb_msb(value: int):
+    assert 0 <= value <= 16383, 'value was {}; must be in the range of [0, 2^14 - 1].'.format(value)
     lsb = value & 0x7F  # 7 bits for least significant byte
     msb = (value >> 7) & 0x7F  # shift 7 and take next 7 bits for msb
     return lsb, msb
@@ -53,7 +55,6 @@ class Controller:
     example, '/dev/ttyACM2' or for Windows, something like 'COM3'.
 
     TODO: Automatic serial reconnect.
-    TODO: Change targets from 1/4 us intervals to 1 us intervals.
     """
 
     class SerialCommands:
@@ -116,13 +117,12 @@ class Controller:
 
         self.safe_close = safe_close
 
-        # Track target position for each servo. The function isMoving() will
-        # use the Target vs Current servo position to determine if movement is
-        # occurring.  Up to 24 servos on a Maestro, (0-23). Targets start at 0.
-        self.targets = [0] * 24
-        # Servo minimum and maximum targets can be restricted to protect components.
-        self.mins = [0] * 24
-        self.maxs = [0] * 24
+        # Track target position for each servo
+        self.targets_us: MutableSequence[Union[int, float]] = [0] * 24
+
+        # Servo minimum and maximum targets can be restricted to protect components
+        self.mins: MutableSequence[Union[None, int, float]] = [None] * 24
+        self.maxs: MutableSequence[Union[None, int, float]] = [None] * 24
 
         self._closed = False
 
@@ -161,9 +161,8 @@ class Controller:
         :return: 0 if no errors have occurred since the last check; non-zero if an error has occurred.
         """
         self.send_cmd(bytes((self.SerialCommands.GET_ERRORS,)))
-        lsb = ord(self._usb.read())
-        msb = ord(self._usb.read())
-        return (msb << 8) | lsb
+        data = self._usb.read(2)
+        return data[0] << 8 | data[1]
 
     def go_home(self):
         """
@@ -184,8 +183,9 @@ class Controller:
     def send_cmd(self, cmd: Union[bytes, bytearray]):
         """Send a Pololu command out the serial port."""
         self._usb.write(self._pololu_cmd + cmd)
+        self._usb.flush()
 
-    @micro_maestro_not_supported
+    @_micro_maestro_not_supported
     def set_pwm(self, on_time_us: Union[int, float], period_us: Union[int, float]):
         """
         Sets the PWM output to the specified on time and period.
@@ -194,28 +194,28 @@ class Controller:
         :param on_time_us: PWM on-time in microseconds.
         :param period_us: PWM period in microseconds.
         """
-        on_time = int(round(48 * on_time_us))  # The command uses 1/18th us intervals
+        on_time = int(round(48 * on_time_us))  # The command uses 1/48th us intervals
         on_time_lsb, on_time_msb = _get_lsb_msb(on_time)
         period = int(round(48 * period_us))  # The command uses 1/48th us intervals
         period_lsb, period_msb = _get_lsb_msb(period)
         self.send_cmd(bytes((self.SerialCommands.SET_PWM, on_time_lsb, on_time_msb, period_lsb, period_msb)))
 
-    def set_range(self, chan, min, max):
+    def set_range(self, channel: int, min_us: Union[int, float], max_us: Union[int, float]):
         """
-        Set channels min and max value range.  Use this as a safety to protect
-        from accidentally moving outside known safe parameters. A setting of 0
-        allows unrestricted movement.
+        Set channels min and max value range.  Use this as a safety to protect from accidentally moving outside known
+        safe parameters. A setting of 0 or None allows unrestricted movement.
 
-        Note that the Maestro itself is configured to limit the range of servo travel
-        which has precedence over these values.  Use the Maestro Control Center to configure
-        ranges that are saved to the controller.  Use setRange for software controllable ranges.
+        Note that the Maestro itself is configured to limit the range of servo travel which has precedence over these
+        values. Use the Maestro Control Center to configure ranges that are saved to the controller. Use setRange for
+        software controllable ranges.
         """
-        self.mins[chan] = min
-        self.maxs[chan] = max
+        self.mins[channel] = min_us
+        self.maxs[channel] = max_us
 
     def stop_channel(self, channel: int):
         """
         Sets the target of the specified channel to 0, causing the Maestro to stop sending PWM signals on that channel.
+
         :param channel: PWM channel to stop sending PWM signals to.
         """
         self.set_target(channel, 0)
@@ -224,15 +224,15 @@ class Controller:
         """Causes the script to stop, if it is currently running."""
         self.send_cmd(bytes((self.SerialCommands.STOP_SCRIPT,)))
 
-    def get_min(self, chan):
+    def get_min(self, channel: int):
         """Return minimum channel range value."""
-        return self.mins[chan]
+        return self.mins[channel]
 
-    def get_max(self, chan):
+    def get_max(self, channel: int):
         """Return maximum channel range value."""
-        return self.maxs[chan]
+        return self.maxs[channel]
 
-    def set_target(self, chan, target):
+    def set_target(self, channel: int, target_us: Union[int, float]):
         """
         Set channel to a specified target value.  Servo will begin moving based
         on Speed and Acceleration parameters previously set.
@@ -243,19 +243,25 @@ class Controller:
         If channel is configured for digital output, values < 6000 = Low output
         """
 
-        # if Min is defined and Target is below, force to Min
-        if self.mins[chan] > 0 and target < self.mins[chan]:
-            target = self.mins[chan]
-        # if Max is defined and Target is above, force to Max
-        if 0 < self.maxs[chan] < target:
-            target = self.maxs[chan]
+        # If min is defined and target is below, force to min
+        min_target_us = self.mins[channel]
+        if min_target_us and target_us < min_target_us:
+            target_us = min_target_us
 
-        lsb, msb = _get_lsb_msb(target)
-        self.send_cmd(bytes((self.SerialCommands.SET_TARGET, chan, lsb, msb)))
+        # If max is defined and target is above, force to max
+        max_target_us = self.maxs[channel]
+        if max_target_us and target_us > max_target_us:
+            target_us = max_target_us
+
         # Record target value
-        self.targets[chan] = target
+        self.targets_us[channel] = target_us
 
-    def set_targets(self, targets: dict):
+        # Send the target to the Maestro
+        target = int(round(4 * target_us))
+        lsb, msb = _get_lsb_msb(target)
+        self.send_cmd(bytes((self.SerialCommands.SET_TARGET, channel, lsb, msb)))
+
+    def set_targets(self, targets: Mapping[int, Union[int, float]]):
         """
         Set multiple channel targets at once.
 
@@ -265,7 +271,7 @@ class Controller:
         The other Maestro models, however, support the option of setting the targets for a block of channels using a
         single command.  This method will use that "set multiple targets" command when possible, for maximum efficiency.
 
-        :param targets: A dict mapping channels to their targets.
+        :param targets: A dict mapping channels to their targets (in microseconds).
         """
         if self.is_micro:
             for channel, target in targets.items():
@@ -302,10 +308,11 @@ class Controller:
                 else:
                     cmd = bytearray((self.SerialCommands.SET_MULTIPLE_TARGETS, target_count, first_channel))
                     for target in target_block:
+                        target = int(float(4 * target))
                         cmd += bytes(_get_lsb_msb(target))
                     self.send_cmd(cmd)
 
-    def set_speed(self, chan, speed):
+    def set_speed(self, channel: int, speed: int):
         """
         Set speed of channel
         Speed is measured as 0.25microseconds/10milliseconds
@@ -313,17 +320,17 @@ class Controller:
         of 1 will take 1 minute, and a speed of 60 would take 1 second. Speed of 0 is unrestricted.
         """
         lsb, msb = _get_lsb_msb(speed)
-        self.send_cmd(bytes((self.SerialCommands.SET_SPEED, chan, lsb, msb)))
+        self.send_cmd(bytes((self.SerialCommands.SET_SPEED, channel, lsb, msb)))
 
-    def set_accel(self, chan, accel):
+    def set_acceleration(self, channel: int, acceleration: int):
         """
         Set acceleration of channel
         This provide soft starts and finishes when servo moves to target position.
-        Valid values are from 0 to 255. 0=unrestricted, 1 is slowest start.
+        Valid values are from 0 to 255. 0 = unrestricted, 1 is slowest start.
         A value of 1 will take the servo about 3s to move between 1ms to 2ms range.
         """
-        lsb, msb = _get_lsb_msb(accel)
-        self.send_cmd(bytes((self.SerialCommands.SET_ACCELERATION, chan, lsb, msb)))
+        lsb, msb = _get_lsb_msb(acceleration)
+        self.send_cmd(bytes((self.SerialCommands.SET_ACCELERATION, channel, lsb, msb)))
 
     def get_position(self, chan: int):
         """
@@ -336,11 +343,10 @@ class Controller:
         it is not stalled or slowed.
         """
         self.send_cmd(bytes((self.SerialCommands.GET_POSITION, chan)))
-        lsb = ord(self._usb.read())
-        msb = ord(self._usb.read())
-        return (msb << 8) | lsb
+        data = self._usb.read(2)
+        return (data[0] << 8 | data[1]) / 4
 
-    def is_moving(self, chan):
+    def is_moving(self, channel: int):
         """
         Test to see if a servo has reached the set target position.  This only provides
         useful results if the Speed parameter is set slower than the maximum speed of
@@ -350,25 +356,21 @@ class Controller:
         channel, then the target can never be reached, so it will appear to always be
         moving to the target.
         """
-        if self.targets[chan] > 0:
-            if self.get_position(chan) != self.targets[chan]:
-                return True
-        return False
+        target_us = self.targets_us[channel]
+        return target_us and abs(target_us - self.get_position(channel)) < 0.01
 
-    @micro_maestro_not_supported
-    def get_moving_state(self):
+    @_micro_maestro_not_supported
+    def servos_are_moving(self):
         """
-        Have all servo outputs reached their targets? This is useful only if Speed and/or
-        Acceleration have been set on one or more of the channels. Returns True or False.
-        Not available with Micro Maestro.
+        Determines whether the servo outputs have reached their targets or are still changing, and will return True as
+        long as there is at least one servo that is limited by a speed or acceleration setting still moving. Using this
+        command together with the set_target command, you can initiate several servo movements and wait for all the
+        movements to finish before moving on to the next step of your program.
 
-        :raises NotSupportedError: method is called while connected to a Micro Maestro.
+        :returns: True if the Maestro reports that servos are still moving; False otherwise.
         """
         self.send_cmd(bytes((self.SerialCommands.GET_MOVING_STATE,)))
-        if self._usb.read() == chr(0):
-            return False
-        else:
-            return True
+        return self._usb.read()[0] == 1
 
     def run_script_subroutine(self, subroutine: int):
         """
@@ -393,9 +395,6 @@ class Controller:
         :param parameter: The integer parameter to pass to the subroutine (range: 0 to 16383).
         :return:
         """
-        if parameter < 0 or parameter > 16383:
-            raise ValueError('parameter "{}" is out of range; it must be in the range [0, 16383].'.format(parameter))
-
         parameter_lsb, parameter_msb = _get_lsb_msb(parameter)
         self.send_cmd(bytes((
             self.SerialCommands.RESTART_SCRIPT_AT_SUBROUTINE_WITH_PARAMETER,
