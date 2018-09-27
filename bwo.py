@@ -2,30 +2,29 @@
 BWO the robot.
 """
 
-import maestro
+from maestro import Maestro
+
 import servo_motor
 
 
 class ServoMotorController(servo_motor.abstract.ServoMotorController):
     __slots__ = (
-        'maestro_conn',
+        'maestro',
         'servo_channel'
     )
 
-    def __init__(self, maestro_conn: maestro.Controller, servo_channel: int):
-        self.maestro_conn = maestro_conn
+    def __init__(self, maestro: Maestro, servo_channel: int):
+        self.maestro = maestro
         self.servo_channel = servo_channel
 
     def set_pwm_us(self, pwm_us):
-        # Target is in 1/4 us units
-        target = int(round(4 * pwm_us))
-        self.maestro_conn.set_target(self.servo_channel, target)
+        self.maestro.set_target(self.servo_channel, pwm_us)
 
 
 def main():
-    with maestro.Controller() as maestro_conn:
+    with Maestro(is_micro=True) as maestro:
         left_motor = servo_motor.model.ParallaxHighSpeedContinuousServoMotor(
-            ServoMotorController(maestro_conn, 5),
+            ServoMotorController(maestro, 5),
             5
         )
 

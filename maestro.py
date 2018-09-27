@@ -40,7 +40,7 @@ def _get_lsb_msb(value: int):
     return lsb, msb
 
 
-class Controller:
+class Maestro:
     """
     When connected via USB, the Maestro creates two virtual serial ports
     /dev/ttyACM0 for commands and /dev/ttyACM1 for communications.
