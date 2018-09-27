@@ -121,8 +121,8 @@ class Maestro:
         self.targets_us: MutableSequence[Union[int, float]] = [0] * 24
 
         # Servo minimum and maximum targets can be restricted to protect components
-        self.mins: MutableSequence[Union[None, int, float]] = [None] * 24
-        self.maxs: MutableSequence[Union[None, int, float]] = [None] * 24
+        self.min_targets_us: MutableSequence[Union[None, int, float]] = [None] * 24
+        self.max_targets_us: MutableSequence[Union[None, int, float]] = [None] * 24
 
         self._closed = False
 
@@ -167,7 +167,7 @@ class Maestro:
     def go_home(self):
         """
         Sends all servos and outputs to their home positions, just as if an error had occurred. For servos and outputs
-        set to “Ignore”, the position will be unchanged.
+        set to "Ignore", the position will be unchanged.
         """
         self.send_cmd(bytes((self.SerialCommands.GO_HOME,)))
 
@@ -209,8 +209,8 @@ class Maestro:
         values. Use the Maestro Control Center to configure ranges that are saved to the controller. Use setRange for
         software controllable ranges.
         """
-        self.mins[channel] = min_us
-        self.maxs[channel] = max_us
+        self.min_targets_us[channel] = min_us
+        self.max_targets_us[channel] = max_us
 
     def stop_channel(self, channel: int):
         """
@@ -226,11 +226,11 @@ class Maestro:
 
     def get_min(self, channel: int):
         """Return minimum channel range value."""
-        return self.mins[channel]
+        return self.min_targets_us[channel]
 
     def get_max(self, channel: int):
         """Return maximum channel range value."""
-        return self.maxs[channel]
+        return self.max_targets_us[channel]
 
     def set_target(self, channel: int, target_us: Union[int, float]):
         """
@@ -244,12 +244,12 @@ class Maestro:
         """
 
         # If min is defined and target is below, force to min
-        min_target_us = self.mins[channel]
+        min_target_us = self.min_targets_us[channel]
         if min_target_us and target_us < min_target_us:
             target_us = min_target_us
 
         # If max is defined and target is above, force to max
-        max_target_us = self.maxs[channel]
+        max_target_us = self.max_targets_us[channel]
         if max_target_us and target_us > max_target_us:
             target_us = max_target_us
 
