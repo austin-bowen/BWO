@@ -36,3 +36,9 @@ class Time:
         self.minutes = self.Unit.convert(length, unit, self.Unit.MINUTE)
         self.hours = self.Unit.convert(length, unit, self.Unit.HOUR)
         self.days = self.Unit.convert(length, unit, self.Unit.DAY)
+
+    def __add__(self, other):
+        return Time(self.seconds + other.seconds, self.Unit.SECOND)
+
+    def __sub__(self, other):
+        return Time(self.seconds - other.seconds, self.Unit.SECOND)

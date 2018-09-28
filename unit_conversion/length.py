@@ -39,3 +39,9 @@ class Length:
 
         self.inches = self.Unit.convert(length, unit, self.Unit.INCH)
         self.feet = self.Unit.convert(length, unit, self.Unit.FOOT)
+
+    def __add__(self, other):
+        return Length(self.meters + other.meters, self.Unit.METER)
+
+    def __sub__(self, other):
+        return Length(self.meters - other.meters, self.Unit.METER)
