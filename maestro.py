@@ -10,7 +10,7 @@ These functions provide access to many of the Maestro's capabilities using the P
 """
 
 from functools import wraps
-from typing import Mapping, MutableSequence, Union
+from typing import Mapping, MutableSequence, Tuple, Union
 
 import serial
 
@@ -33,7 +33,7 @@ def _micro_maestro_not_supported(method):
     return wrapper
 
 
-def _get_lsb_msb(value: int):
+def _get_lsb_msb(value: int) -> Tuple[int, int]:
     assert 0 <= value <= 16383, 'value was {}; must be in the range of [0, 2^14 - 1].'.format(value)
     lsb = value & 0x7F  # 7 bits for least significant byte
     msb = (value >> 7) & 0x7F  # shift 7 and take next 7 bits for msb
@@ -42,17 +42,14 @@ def _get_lsb_msb(value: int):
 
 class Maestro:
     """
-    When connected via USB, the Maestro creates two virtual serial ports
-    /dev/ttyACM0 for commands and /dev/ttyACM1 for communications.
-    Be sure the Maestro is configured for "USB Dual Port" serial mode.
-    "USB Chained Mode" may work as well, but hasn't been tested.
+    When connected via USB, the Maestro creates two virtual serial ports '/dev/ttyACM0' for commands and '/dev/ttyACM1'
+    for communications. Be sure the Maestro is configured for "USB Dual Port" serial mode. "USB Chained Mode" may work
+    as well, but hasn't been tested.
 
-    Pololu protocol allows for multiple Maestros to be connected to a single
-    serial port. Each connected device is then indexed by number.
-    This device number defaults to 0x0C (or 12 in decimal), which this module
-    assumes.  If two or more controllers are connected to different serial
-    ports, or you are using a Windows OS, you can provide the tty port.  For
-    example, '/dev/ttyACM2' or for Windows, something like 'COM3'.
+    Pololu protocol allows for multiple Maestros to be connected to a single serial port. Each connected device is then
+    indexed by number. This device number defaults to 0x0C (or 12 in decimal), which this module assumes. If two or more
+    controllers are connected to different serial ports, or you are using a Windows OS, you can provide the tty port.
+    For example, '/dev/ttyACM2' or for Windows, something like 'COM3'.
 
     TODO: Automatic serial reconnect.
     """
@@ -111,10 +108,16 @@ class Maestro:
 
         self.is_micro = is_micro
 
-        # Open the command port
-        self._usb = serial.Serial(tty, timeout=timeout)
+        # Timeout of 0 corresponds to "non-blocking" mode, but we don't want that
+        if timeout == 0 or timeout == 0.0:
+            timeout = None
 
-        # Command lead-in and device number are sent for each Pololu serial command.
+        # Open the command port
+        self._conn = serial.Serial(tty, timeout=timeout)
+        self._conn.reset_input_buffer()
+        self._conn.reset_output_buffer()
+
+        # Command lead-in and device number are sent for each Pololu serial command
         self._pololu_cmd = bytes((self.SerialCommands.POLOLU_PROTOCOL, device))
 
         self.safe_close = safe_close
@@ -128,9 +131,6 @@ class Maestro:
 
         self._closed = False
 
-    def __del__(self):
-        self.close()
-
     def __enter__(self):
         return self
 
@@ -139,13 +139,15 @@ class Maestro:
 
     def _read(self, byte_count: int) -> bytes:
         """
-        :raises TimeoutError: Connection timed out waiting to read the specified number of bytes.
+        :raises TimeoutError: Connection timed out waiting to read the specified number of bytes. Input buffer is reset.
         """
         assert byte_count > 0
-        data = self._usb.read(byte_count)
-        if len(data) != byte_count:
+        data = self._conn.read(byte_count)
+        actual_byte_count = len(data)
+        if actual_byte_count != byte_count:
+            self._conn.reset_input_buffer()
             raise TimeoutError(
-                'Tried to read {} bytes, but only got {}.'.format(byte_count, len(data))
+                'Tried to read {} bytes, but only got {}.'.format(byte_count, actual_byte_count)
             )
         return data
 
@@ -158,11 +160,11 @@ class Maestro:
             for channel in range(24):
                 self.stop_channel(channel)
 
-        self._usb.close()
+        self._conn.close()
 
         self._closed = True
 
-    def get_errors(self):
+    def get_errors(self) -> int:
         """
         Use this command to examine the errors that the Maestro has detected. Section 4.e lists the specific errors that
         can be detected by the Maestro. The error register is sent as a two-byte response immediately after the command
@@ -186,7 +188,7 @@ class Maestro:
         """
         self.send_cmd(bytes((self.SerialCommands.GO_HOME,)))
 
-    def script_is_running(self):
+    def script_is_running(self) -> bool:
         """
         :return: True if a script is running; False otherwise.
         :raises TimeoutError: Connection timed out.
@@ -194,12 +196,12 @@ class Maestro:
         self.send_cmd(bytes((self.SerialCommands.GET_SCRIPT_STATUS,)))
 
         # Maestro returns 0x00 if a script is running
-        return self._read(1)[0] == 0
+        return self._read(1)[0] == 0x00
 
     def send_cmd(self, cmd: Union[bytes, bytearray]):
         """Send a Pololu command out the serial port."""
-        self._usb.write(self._pololu_cmd + cmd)
-        self._usb.flush()
+        self._conn.write(self._pololu_cmd + cmd)
+        self._conn.flush()
 
     @_micro_maestro_not_supported
     def set_pwm(self, on_time_us: Union[int, float], period_us: Union[int, float]):
@@ -348,7 +350,7 @@ class Maestro:
         lsb, msb = _get_lsb_msb(acceleration)
         self.send_cmd(bytes((self.SerialCommands.SET_ACCELERATION, channel, lsb, msb)))
 
-    def get_position(self, chan: int):
+    def get_position(self, chan: int) -> float:
         """
         Get the current position of the device on the specified channel
         The result is returned in a measure of quarter-microseconds, which mirrors
@@ -378,7 +380,7 @@ class Maestro:
         return target_us and abs(target_us - self.get_position(channel)) < 0.01
 
     @_micro_maestro_not_supported
-    def servos_are_moving(self):
+    def servos_are_moving(self) -> bool:
         """
         Determines whether the servo outputs have reached their targets or are still changing, and will return True as
         long as there is at least one servo that is limited by a speed or acceleration setting still moving. Using this
@@ -389,7 +391,7 @@ class Maestro:
         :raises TimeoutError: Connection timed out.
         """
         self.send_cmd(bytes((self.SerialCommands.GET_MOVING_STATE,)))
-        return self._read(1)[0] == 1
+        return self._read(1)[0] == 0x01
 
     def run_script_subroutine(self, subroutine: int):
         """

@@ -2,11 +2,10 @@ from .abstract import *
 
 
 class ParallaxHighSpeedContinuousServoMotor(ContinuousServoMotor):
-    def __init__(self, controller: ServoMotorController, voltage: float):
+    def __init__(self, voltage: float):
         hard_max_rpm = scale(voltage, (6, 150), (7.4, 180))
         ContinuousServoMotor.__init__(
             self,
-            controller,
             hard_max_rpm,
             center_pwm_us=1500,
             full_cw_pwm_us=1300,

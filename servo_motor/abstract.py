@@ -4,11 +4,6 @@ def scale(x, point0, point1):
     return (x - x0) * (y1 - y0) / (x1 - x0) + y0
 
 
-class ServoMotorController:
-    def set_pwm_us(self, pwm_us):
-        pass
-
-
 class ServoMotor:
     __slots__ = (
         'controller',
@@ -16,13 +11,7 @@ class ServoMotor:
         'full_ccw_pwm_us'
     )
 
-    def __init__(
-            self,
-            controller: ServoMotorController,
-            full_cw_pwm_us,
-            full_ccw_pwm_us
-    ):
-        self.controller = controller
+    def __init__(self, full_cw_pwm_us, full_ccw_pwm_us):
         self.full_cw_pwm_us = full_cw_pwm_us
         self.full_ccw_pwm_us = full_ccw_pwm_us
 
@@ -33,15 +22,8 @@ class LimitedServoMotor(ServoMotor):
         'full_ccw_deg',
     )
 
-    def __init__(
-            self,
-            controller: ServoMotorController,
-            full_cw_deg,
-            full_cw_pwm_us,
-            full_ccw_deg,
-            full_ccw_pwm_us
-    ):
-        ServoMotor.__init__(self, controller, full_cw_pwm_us, full_ccw_pwm_us)
+    def __init__(self, full_cw_deg, full_cw_pwm_us, full_ccw_deg, full_ccw_pwm_us):
+        ServoMotor.__init__(self, full_cw_pwm_us, full_ccw_pwm_us)
         self.full_cw_deg = full_cw_deg
         self.full_ccw_deg = full_ccw_deg
 
@@ -60,15 +42,8 @@ class ContinuousServoMotor(ServoMotor):
         'hard_max_rpm'
     )
 
-    def __init__(
-            self,
-            controller: ServoMotorController,
-            hard_max_rpm,
-            center_pwm_us,
-            full_cw_pwm_us,
-            full_ccw_pwm_us
-    ):
-        ServoMotor.__init__(self, controller, full_cw_pwm_us, full_ccw_pwm_us)
+    def __init__(self, hard_max_rpm, center_pwm_us, full_cw_pwm_us, full_ccw_pwm_us):
+        ServoMotor.__init__(self, full_cw_pwm_us, full_ccw_pwm_us)
         self.hard_max_rpm = hard_max_rpm
         self.center_pwm_us = center_pwm_us
 
@@ -90,12 +65,9 @@ class ContinuousServoMotor(ServoMotor):
         else:
             return self.center_pwm_us
 
-    def set_rpm(self, rpm):
+    def get_pwm_us_for_rpm(self, rpm):
         speed = scale(rpm, (0, 0), (self.hard_max_rpm, 1))
-        self.set_speed(speed)
+        self.get_pwm_us_for_speed(speed)
 
-    def set_speed(self, speed):
+    def get_pwm_us_for_speed(self, speed):
         self.controller.set_pwm_us(self.map_speed_to_pwm_us(speed))
-
-    def stop(self):
-        self.set_speed(0)
