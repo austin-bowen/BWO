@@ -45,3 +45,6 @@ class Length:
 
     def __sub__(self, other):
         return Length(self.meters - other.meters, self.Unit.METER)
+
+    def __mul__(self, other: IntOrFloat):
+        return Length(self.meters * other, self.Unit.METER)
