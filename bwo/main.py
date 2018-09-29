@@ -3,25 +3,25 @@ BWO the robot.
 """
 
 from maestro import Maestro
-from .io.motor import DriveMotorController
+from bwo.io.motor import DriveMotorController
 
 
 def main():
-    motor = DriveMotorController.Motor.LEFT
-
     with Maestro(is_micro=True) as maestro:
         drive_motors = DriveMotorController(maestro)
 
         print('Max RPM: {}\n'.format(drive_motors.motor_model.hard_max_rpm))
 
         while True:
-            rpm = input('Enter RPM: ')
             try:
-                rpm = int(rpm)
-            except ValueError:
+                v_x, v_y, omega = input('v_x, v_y, omega = ').split(',')
+                v_x = float(v_x.strip())
+                v_y = float(v_y.strip())
+                omega = float(omega.strip())
+            except:
                 break
 
-            drive_motors.set_motor_rpm(motor, rpm)
+            drive_motors.set_body_velocity(v_x, v_y, omega)
 
         drive_motors.stop()
 
