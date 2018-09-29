@@ -1,4 +1,10 @@
-def scale(x, point0, point1):
+from typing import Sequence, Union
+
+Number = Union[float, int]
+Point = Sequence[Number]
+
+
+def scale(x: Number, point0: Point, point1: Point) -> Number:
     x0, y0 = point0
     x1, y1 = point1
     return (x - x0) * (y1 - y0) / (x1 - x0) + y0
@@ -6,12 +12,11 @@ def scale(x, point0, point1):
 
 class ServoMotor:
     __slots__ = (
-        'controller',
         'full_cw_pwm_us',
         'full_ccw_pwm_us'
     )
 
-    def __init__(self, full_cw_pwm_us, full_ccw_pwm_us):
+    def __init__(self, full_cw_pwm_us: Number, full_ccw_pwm_us: Number):
         self.full_cw_pwm_us = full_cw_pwm_us
         self.full_ccw_pwm_us = full_ccw_pwm_us
 
@@ -22,18 +27,17 @@ class LimitedServoMotor(ServoMotor):
         'full_ccw_deg',
     )
 
-    def __init__(self, full_cw_deg, full_cw_pwm_us, full_ccw_deg, full_ccw_pwm_us):
+    def __init__(self, full_cw_deg: Number, full_cw_pwm_us: Number, full_ccw_deg: Number, full_ccw_pwm_us: Number):
         ServoMotor.__init__(self, full_cw_pwm_us, full_ccw_pwm_us)
         self.full_cw_deg = full_cw_deg
         self.full_ccw_deg = full_ccw_deg
 
-    def set_angle(self, deg):
-        pwm_us = scale(
+    def get_pwm_us_for_angle(self, deg: Number) -> Number:
+        return scale(
             deg,
             (self.full_cw_deg, self.full_cw_pwm_us),
             (self.full_ccw_deg, self.full_ccw_pwm_us)
         )
-        self.controller.set_pwm_us(pwm_us)
 
 
 class ContinuousServoMotor(ServoMotor):
@@ -42,12 +46,12 @@ class ContinuousServoMotor(ServoMotor):
         'hard_max_rpm'
     )
 
-    def __init__(self, hard_max_rpm, center_pwm_us, full_cw_pwm_us, full_ccw_pwm_us):
+    def __init__(self, hard_max_rpm: Number, center_pwm_us: Number, full_cw_pwm_us: Number, full_ccw_pwm_us: Number):
         ServoMotor.__init__(self, full_cw_pwm_us, full_ccw_pwm_us)
         self.hard_max_rpm = hard_max_rpm
         self.center_pwm_us = center_pwm_us
 
-    def map_speed_to_pwm_us(self, speed):
+    def map_speed_to_pwm_us(self, speed: Number) -> Number:
         """
         Continuous rotation servos may have a non-linear speed response to the PWM signal.
         This method should convert the speed into PWM values such that the servo speed
@@ -65,9 +69,9 @@ class ContinuousServoMotor(ServoMotor):
         else:
             return self.center_pwm_us
 
-    def get_pwm_us_for_rpm(self, rpm):
+    def get_pwm_us_for_rpm(self, rpm: Number) -> Number:
         speed = scale(rpm, (0, 0), (self.hard_max_rpm, 1))
-        self.get_pwm_us_for_speed(speed)
+        return self.get_pwm_us_for_speed(speed)
 
-    def get_pwm_us_for_speed(self, speed):
-        self.controller.set_pwm_us(self.map_speed_to_pwm_us(speed))
+    def get_pwm_us_for_speed(self, speed: Number) -> Number:
+        return self.map_speed_to_pwm_us(speed)

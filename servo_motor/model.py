@@ -2,7 +2,7 @@ from .abstract import *
 
 
 class ParallaxHighSpeedContinuousServoMotor(ContinuousServoMotor):
-    def __init__(self, voltage: float):
+    def __init__(self, voltage: Number):
         hard_max_rpm = scale(voltage, (6, 150), (7.4, 180))
         ContinuousServoMotor.__init__(
             self,
@@ -12,7 +12,7 @@ class ParallaxHighSpeedContinuousServoMotor(ContinuousServoMotor):
             full_ccw_pwm_us=1700
         )
 
-    def map_speed_to_pwm_us(self, speed):
+    def map_speed_to_pwm_us(self, speed: Number) -> Number:
         """
         The map of PWM signal to speed for this servo looks like a sigmoid function.  See page 3 of the documentation:
         https://www.parallax.com/sites/default/files/downloads/900-00025-High-Speed-CR-Servo-Guide-v1.1.pdf
@@ -24,7 +24,9 @@ class ParallaxHighSpeedContinuousServoMotor(ContinuousServoMotor):
         near_full_ccw_point = (-0.88, 1580)
         full_ccw_point = (-1, self.full_ccw_pwm_us)
 
-        if speed >= near_full_cw_point[0]:
+        if speed >= 1:
+            return self.full_cw_pwm_us
+        elif speed >= near_full_cw_point[0]:
             return scale(speed, near_full_cw_point, full_cw_point)
         elif speed > 0:
             return scale(speed, center_point, near_full_cw_point)
@@ -32,5 +34,7 @@ class ParallaxHighSpeedContinuousServoMotor(ContinuousServoMotor):
             return self.center_pwm_us
         elif speed >= near_full_ccw_point[0]:
             return scale(speed, center_point, near_full_ccw_point)
-        else:
+        elif speed > -1:
             return scale(speed, near_full_ccw_point, full_ccw_point)
+        else:
+            return self.full_ccw_pwm_us
