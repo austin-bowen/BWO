@@ -3,7 +3,6 @@ BWO the robot.
 """
 
 from collections import namedtuple
-from math import sqrt
 
 from pynput import keyboard
 
@@ -21,8 +20,8 @@ def with_maestro(maestro: Maestro):
     ROTATE_CW_KEY = 'd'
     ROTATE_CCW_KEY = 'a'
 
-    XY_MAGNITUDE = 0.3
-    OMEGA_MAGNITUDE = 90
+    XY_MAGNITUDE = 1
+    OMEGA_MAGNITUDE = 1
 
     Velocity = namedtuple('Velocity', ('x', 'y', 'omega'))
 
@@ -40,9 +39,6 @@ def with_maestro(maestro: Maestro):
             print('No need to update velocity')
 
         print('New velocity:', new_velocity)
-        if x and y:
-            x *= 0.87
-            y *= 0.87
         motor_controller.set_body_velocity(x, y, omega)
 
         prev_velocity = new_velocity
@@ -97,10 +93,6 @@ def with_maestro(maestro: Maestro):
 
 def main():
     with Maestro(is_micro=True) as maestro:
-        drive_motors = DriveMotorController(maestro)
-
-        print('Max RPM: {}\n'.format(drive_motors.motor_model.hard_max_rpm))
-
         with_maestro(maestro)
 
 

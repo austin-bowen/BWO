@@ -10,108 +10,88 @@ from .. import settings
 Number = Union[float, int]
 
 
+class DriveMotor:
+    def __init__(self, channel: int, dead_zone):
+        self.channel = channel
+        self.model = ParallaxHighSpeedContinuousServoMotor(settings.MOTOR_VOLTAGE, dead_zone)
+
+
+class DriveMotorEnum(Enum):
+    """Represents the three drive motors and their corresponding PWM channel."""
+
+    LEFT = DriveMotor(settings.LEFT_MOTOR_CHANNEL, (1497, 1506))
+    RIGHT = DriveMotor(settings.RIGHT_MOTOR_CHANNEL, (1499, 1508))
+    BACK = DriveMotor(settings.BACK_MOTOR_CHANNEL, (1500, 1509))
+
+    def get_motor(self) -> DriveMotor:
+        return self.value
+
+
 class DriveMotorController:
-    SPEED = 8
+    SPEED = 0
     ACCELERATION = 0
 
-    _BODY_TO_WHEEL_VELOCITY = np.array((
-        (1, 0, -settings.BODY_RADIUS.meters),
-        (-0.5, np.sqrt(3) / 2, -settings.BODY_RADIUS.meters),
-        (-0.5, -np.sqrt(3) / 2, -settings.BODY_RADIUS.meters)
+    _BODY_TO_WHEEL_SPEED = np.array((
+        # v_x, v_y, omega
+        (-1 / np.sqrt(3), -1, -1),  # Left motor
+        (-1 / np.sqrt(3), +1, -1),  # Right motor
+        (+1.75 / np.sqrt(3), +0, -1)  # Back motor
     ))
-
-    class Motor(Enum):
-        """Represents the three drive motors and their corresponding PWM channel."""
-
-        LEFT = settings.LEFT_MOTOR_CHANNEL
-        RIGHT = settings.RIGHT_MOTOR_CHANNEL
-        BACK = settings.BACK_MOTOR_CHANNEL
-
-        def get_channel(self):
-            return self.value
 
     def __init__(self, maestro: Maestro):
         self.maestro = maestro
-        channels = (
-            self.Motor.LEFT.get_channel(),
-            self.Motor.RIGHT.get_channel(),
-            self.Motor.BACK.get_channel()
-        )
-        for channel in channels:
+
+        for motor in DriveMotorEnum:
+            channel = motor.get_motor().channel
             maestro.set_speed(channel, self.SPEED)
             maestro.set_acceleration(channel, self.ACCELERATION)
 
-        self.motor_model = ParallaxHighSpeedContinuousServoMotor(settings.MOTOR_VOLTAGE)
         self.stop()
 
-        self.max_wheel_speed_mps = settings.WHEEL_CIRCUMFERENCE.meters * self.motor_model.hard_max_rpm / 60
-        print('Max wheel speed [m/s]:', round(self.max_wheel_speed_mps, 2))
-
-    def set_motor_rpm(self, motor: Motor, rpm: Number):
+    def set_motor_speed(self, motor: DriveMotorEnum, speed: Number):
+        motor = motor.get_motor()
         self.maestro.set_target(
-            motor.get_channel(),
-            self.motor_model.get_pwm_us_for_rpm(rpm)
-        )
-
-    def set_motor_rpms(self, left_rpm: Number, right_rpm: Number, back_rpm: Number):
-        self.set_motor_rpm(self.Motor.LEFT, left_rpm)
-        self.set_motor_rpm(self.Motor.RIGHT, right_rpm)
-        self.set_motor_rpm(self.Motor.BACK, back_rpm)
-
-    def set_motor_speed(self, motor: Motor, speed: Number):
-        self.maestro.set_target(
-            motor.get_channel(),
-            self.motor_model.get_pwm_us_for_speed(speed)
+            motor.channel,
+            motor.model.get_pwm_us_for_speed(speed)
         )
 
     def set_motor_speeds(self, left_speed: Number, right_speed: Number, back_speed: Number):
-        self.set_motor_speed(self.Motor.LEFT, left_speed)
-        self.set_motor_speed(self.Motor.RIGHT, right_speed)
-        self.set_motor_speed(self.Motor.BACK, back_speed)
+        self.set_motor_speed(DriveMotorEnum.LEFT, left_speed)
+        self.set_motor_speed(DriveMotorEnum.RIGHT, right_speed)
+        self.set_motor_speed(DriveMotorEnum.BACK, back_speed)
 
     def set_body_velocity(self, v_x: Number, v_y: Number, omega: Number):
         """
-
-        :param v_x: X velocity [m/s].
-        :param v_y: Y velocity [m/s].
-        :param omega: Rotational velocity [deg/s]. Positive angle corresponds to clockwise rotation.
-        :return:
+        :param v_x: X velocity [-1, 1].
+        :param v_y: Y velocity [-1, 1].
+        :param omega: Rotational velocity [-1, 1]. Positive value corresponds to clockwise rotation.
         """
         print('set body velocity:    v_x={} m/s    v_y={} m/s    omega={} deg/s'.format(v_x, v_y, omega))
 
         body_velocity = np.array((
             (v_x,),
             (v_y,),
-            (np.deg2rad(omega),)
+            (omega,)
         ))
 
-        wheel_velocity = np.matmul(self._BODY_TO_WHEEL_VELOCITY, body_velocity)
-        back_wheel_velocity, right_wheel_velocity, left_wheel_velocity = wheel_velocity[:, 0]
-        print('left :', left_wheel_velocity)
-        print('right:', right_wheel_velocity)
-        print('back :', back_wheel_velocity)
+        # Shape: [left-motor, right-motor, back-motor]
+        motor_speeds = np.matmul(self._BODY_TO_WHEEL_SPEED, body_velocity)[:, 0]
+        print('Motor speeds [L, R, B]:', motor_speeds)
 
-        motor_rpms = np.array((
-            self.wheel_velocity_to_motor_rpm(left_wheel_velocity),
-            self.wheel_velocity_to_motor_rpm(right_wheel_velocity),
-            self.wheel_velocity_to_motor_rpm(back_wheel_velocity)
-        ))
-        print(motor_rpms)
+        max_motor_speed = np.abs(motor_speeds).max()
+        if max_motor_speed > 1:
+            print('WARNING: Commanded to move motor(s) faster than their max speed; scaling down.')
+            motor_speeds = motor_speeds / max_motor_speed
+            print('Scaled motor speeds [L, R, B]:', motor_speeds)
 
-        max_motor_rpm = np.abs(motor_rpms).max()
-        if max_motor_rpm > self.motor_model.hard_max_rpm:
-            print('WARNING: Commanded to move motor(s) faster than their max RPM; scaling down.')
-            motor_rpms = motor_rpms * self.motor_model.hard_max_rpm / max_motor_rpm
-            print(motor_rpms)
-
-        self.set_motor_rpms(*motor_rpms)
+        self.set_motor_speeds(*motor_speeds)
 
     def stop(self):
-        for motor in DriveMotorController.Motor:
+        for motor in DriveMotorEnum:
             self.stop_motor(motor)
 
-    def stop_motor(self, motor: Motor):
-        self.set_motor_rpm(motor, 0)
+    def stop_motor(self, motor: DriveMotorEnum):
+        self.set_motor_speed(motor, 0)
 
     @staticmethod
     def wheel_velocity_to_motor_rpm(v_wheel: Number):
