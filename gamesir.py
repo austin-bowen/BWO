@@ -55,6 +55,12 @@ class GameSirController(evdev.InputDevice):
             self.close()
             raise ValueError('Input device at "{}" is not a GameSir controller.'.format(device_path))
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
 
 def get_controllers() -> Sequence[GameSirController]:
     """Returns a list of discovered GameSirController instances."""
