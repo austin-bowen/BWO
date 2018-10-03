@@ -1,7 +1,7 @@
 """Library for interfacing with the GameSir Bluetooth controller."""
 
 from enum import Enum
-from typing import Collection
+from typing import Sequence
 
 import evdev
 
@@ -56,7 +56,7 @@ class GameSirController(evdev.InputDevice):
             raise ValueError('Input device at "{}" is not a GameSir controller.'.format(device_path))
 
 
-def get_controllers() -> Collection[GameSirController]:
+def get_controllers() -> Sequence[GameSirController]:
     """Returns a list of discovered GameSirController instances."""
     controllers = []
     for device_path in evdev.list_devices():
