@@ -1,6 +1,9 @@
 #!/bin/sh
 
+
+
 echo Pulling changes...
+wget https://raw.githubusercontent.com/SaltyHash/PycoTTS/master/pycotts.py
 git pull
 
 echo Installing dependencies...
