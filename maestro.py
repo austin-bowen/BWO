@@ -15,7 +15,7 @@ from typing import Mapping, MutableSequence, Tuple, Union
 import serial
 
 
-def _micro_maestro_not_supported(method):
+def micro_maestro_not_supported(method):
     """
     Methods using this decorator will raise a MicroMaestroNotSupportedError if the Controller is for the Micro Maestro.
     """
@@ -52,6 +52,7 @@ class Maestro:
     For example, '/dev/ttyACM2' or for Windows, something like 'COM3'.
 
     TODO: Automatic serial reconnect.
+    TODO: Support multi-threaded use.
     """
 
     class SerialCommands:
@@ -203,7 +204,7 @@ class Maestro:
         self._conn.write(self._pololu_cmd + cmd)
         self._conn.flush()
 
-    @_micro_maestro_not_supported
+    @micro_maestro_not_supported
     def set_pwm(self, on_time_us: Union[int, float], period_us: Union[int, float]):
         """
         Sets the PWM output to the specified on time and period.
@@ -379,7 +380,7 @@ class Maestro:
         target_us = self.targets_us[channel]
         return target_us and abs(target_us - self.get_position(channel)) < 0.01
 
-    @_micro_maestro_not_supported
+    @micro_maestro_not_supported
     def servos_are_moving(self) -> bool:
         """
         Determines whether the servo outputs have reached their targets or are still changing, and will return True as
