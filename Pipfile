@@ -9,3 +9,7 @@ numpy = "*"
 pyserial = "*"
 
 [dev-packages]
+
+
+[require]
+python_version = "3.6"
