@@ -8,11 +8,13 @@ from servo_motor.abstract import Point, scale
 
 class Head:
     NECK_CHANNEL = 0
+    NECK_SPEED = 50
+    NECK_ACCELERATION = 0
 
     def __init__(self, maestro: Maestro):
         self.maestro = maestro
-        self.maestro.set_acceleration(self.NECK_CHANNEL, 15)
-        self.maestro.set_speed(self.NECK_CHANNEL, 30)
+        self.maestro.set_speed(self.NECK_CHANNEL, self.NECK_SPEED)
+        self.maestro.set_acceleration(self.NECK_CHANNEL, self.NECK_ACCELERATION)
 
         self.set_head_position(0)
 
