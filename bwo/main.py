@@ -2,11 +2,28 @@
 BWO the robot.
 """
 
-import gamesir
+from numbers import Real
+from time import sleep, time
 
+import gamesir
 from bwo.io.head import Head
 from bwo.io.motor import DriveMotorController
 from maestro import Maestro
+
+
+def get_controller(timeout: Real = 60) -> gamesir.GameSirController:
+    t0 = time()
+
+    while True:
+        try:
+            return gamesir.get_controllers()[0]
+        except IndexError:
+            print('No controller found.')
+
+        if (time() - t0) > timeout:
+            raise TimeoutError('Took too long for controller to connect; exiting BWO.')
+
+        sleep(1)
 
 
 def main(controller: gamesir.GameSirController, maestro: Maestro):
@@ -46,6 +63,7 @@ def main(controller: gamesir.GameSirController, maestro: Maestro):
                 elif event_code == controller.EventCode.RIGHT_JOYSTICK_X:
                     velocity.omega = event.value / 128 - 1
                 elif event_code == controller.EventCode.B_BUTTON and event.value == 1:
+                    print('Stopping BWO!')
                     drive_motors.stop()
                     break
 
@@ -57,5 +75,5 @@ def main(controller: gamesir.GameSirController, maestro: Maestro):
 
 
 if __name__ == '__main__':
-    with gamesir.get_controllers()[0] as _controller, Maestro(is_micro=True) as _maestro:
+    with get_controller() as _controller, Maestro(is_micro=True) as _maestro:
         main(_controller, _maestro)
