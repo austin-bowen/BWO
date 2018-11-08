@@ -50,8 +50,8 @@ class DriveMotorController(Thread):
         (+1.75 / np.sqrt(3), +0, -1)  # Back motor
     ))
 
-    _FILTER_FREQ_HZ: Real = 1
-    _UPDATE_PERIOD_S: Real = 0.1
+    _FILTER_FREQ_HZ: Real = 0.75
+    _UPDATE_PERIOD_S: Real = 1 / 15
 
     def __init__(self, maestro: Maestro):
         Thread.__init__(self, name=self.__class__.__name__ + ' Thread')
@@ -67,9 +67,9 @@ class DriveMotorController(Thread):
             maestro.set_speed(channel, self.SPEED)
             maestro.set_acceleration(channel, self.ACCELERATION)
 
-        self._target_body_velocity: BodyVelocity = None
+        self._target_body_velocity: BodyVelocity = BodyVelocity(0, 0, 0)
         self._previous_body_velocity_timestamp: BodyVelocityTimestamp = None
-        self._set_body_velocity_immediately = False
+        self._set_body_velocity_immediately = True
         self.stop()
 
     def __enter__(self):
@@ -88,10 +88,7 @@ class DriveMotorController(Thread):
         while not self._shutdown_event.wait(shutdown_timeout):
             t0 = time()
 
-            try:
-                self._set_motor_velocities()
-            except Exception as e:
-                self._log(str(e))
+            self._set_motor_velocities()
 
             shutdown_timeout = self._UPDATE_PERIOD_S - (time() - t0)
             shutdown_timeout = max(shutdown_timeout, 0)
@@ -124,14 +121,15 @@ class DriveMotorController(Thread):
         self.set_body_velocity(0, 0, 0, immediate=True)
 
     def _set_motor_velocities(self):
-        target_body_velocity = np.array(self._target_body_velocity)
-        previous_body_velocity, previous_time = self._previous_body_velocity_timestamp
-        previous_body_velocity = np.array(previous_body_velocity)
+        target_body_velocity = np.array((self._target_body_velocity,))
 
         if self._set_body_velocity_immediately:
             self._set_body_velocity_immediately = False
             body_velocity = target_body_velocity
         else:
+            previous_body_velocity, previous_time = self._previous_body_velocity_timestamp
+            previous_body_velocity = np.array(previous_body_velocity)
+
             # Apply low-pass filter to the target body velocity
             dt = time() - previous_time
             a0 = 2 * np.pi * dt * self._FILTER_FREQ_HZ
@@ -140,7 +138,6 @@ class DriveMotorController(Thread):
 
         # Shape: [left-motor, right-motor, back-motor]
         motor_speeds = np.matmul(self._BODY_TO_WHEEL_SPEED, body_velocity.T)[:, 0]
-        print('Motor speeds [L, R, B]:', motor_speeds)
 
         max_motor_speed = np.abs(motor_speeds).max()
         if max_motor_speed > 1:
@@ -149,4 +146,4 @@ class DriveMotorController(Thread):
             print('Scaled motor speeds [L, R, B]:', motor_speeds)
 
         self.set_motor_speeds(*motor_speeds)
-        self._previous_body_velocity_timestamp = BodyVelocityTimestamp(BodyVelocity(*body_velocity), time())
+        self._previous_body_velocity_timestamp = BodyVelocityTimestamp(BodyVelocity(*body_velocity[0]), time())
