@@ -7,9 +7,9 @@ name = "pypi"
 evdev = "*"
 numpy = "*"
 pyserial = "*"
+opencv-python = "*"
 
 [dev-packages]
-
 
 [require]
 python_version = "3.6"
