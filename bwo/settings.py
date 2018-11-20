@@ -1,7 +1,8 @@
 """BWO settings."""
 
-from unit_conversion.length import Length
 from numpy import pi
+
+from unit_conversion.length import Length
 
 BODY_RADIUS = Length(4, Length.Unit.INCH)
 

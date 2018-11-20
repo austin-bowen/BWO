@@ -8,6 +8,7 @@ evdev = "*"
 numpy = "*"
 pyserial = "*"
 opencv-python = "*"
+pypubsub = "*"
 
 [dev-packages]
 

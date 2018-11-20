@@ -1,20 +1,26 @@
+from copy import copy
 from enum import Enum
 from numbers import Real
-from threading import Event, Thread
 from time import time
 from typing import NamedTuple
 
 import numpy as np
 
+from bwo import settings
+from bwo.manager import ManagerThread
 from maestro import Maestro
 from servo_motor.model import ParallaxHighSpeedContinuousServoMotor
-from .. import settings
 
 
-class BodyVelocity(NamedTuple):
+class BodyVelocity:
     x: Real
     y: Real
     omega: Real
+
+    def __init__(self, x: Real, y: Real, omega: Real):
+        self.x = x
+        self.y = y
+        self.omega = omega
 
 
 class BodyVelocityTimestamp(NamedTuple):
@@ -39,7 +45,7 @@ class DriveMotorEnum(Enum):
         return self.value
 
 
-class DriveMotorController(Thread):
+class DriveMotorController(ManagerThread):
     SPEED = 0
     ACCELERATION = 0
 
@@ -50,15 +56,13 @@ class DriveMotorController(Thread):
         (+1.75 / np.sqrt(3), +0, -1)  # Back motor
     ))
 
+    LOOP_PERIOD_S: Real = 1 / 15
     _FILTER_FREQ_HZ: Real = 0.75
-    _UPDATE_PERIOD_S: Real = 1 / 15
 
     def __init__(self, maestro: Maestro):
-        Thread.__init__(self, name=self.__class__.__name__ + ' Thread')
+        assert self.LOOP_PERIOD_S <= 1 / self._FILTER_FREQ_HZ
 
-        assert self._UPDATE_PERIOD_S <= 1 / self._FILTER_FREQ_HZ
-
-        self._shutdown_event = Event()
+        ManagerThread.__init__(self, name='Drive Motor Controller')
 
         # Setup the Maestro
         self.maestro = maestro
@@ -70,28 +74,14 @@ class DriveMotorController(Thread):
         self._target_body_velocity: BodyVelocity = BodyVelocity(0, 0, 0)
         self._previous_body_velocity_timestamp: BodyVelocityTimestamp = None
         self._set_body_velocity_immediately = True
-        self.stop()
-
-    def __enter__(self):
-        self.start()
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self._shutdown_event.set()
-        self.join()
+        self.stop_motors()
 
     def _log(self, message: str):
         print('[{}] {}'.format(self.name, message))
 
-    def run(self):
-        shutdown_timeout = 0.0
-        while not self._shutdown_event.wait(shutdown_timeout):
-            t0 = time()
-
-            self._set_motor_velocities()
-
-            shutdown_timeout = self._UPDATE_PERIOD_S - (time() - t0)
-            shutdown_timeout = max(shutdown_timeout, 0)
+    def get_target_body_velocity(self) -> BodyVelocity:
+        """Returns a copy of the target body velocity."""
+        return copy(self._target_body_velocity)
 
     def set_motor_speed(self, motor: DriveMotorEnum, speed: Real):
         motor = motor.get_motor()
@@ -117,10 +107,10 @@ class DriveMotorController(Thread):
         if immediate:
             self._set_body_velocity_immediately = True
 
-    def stop(self):
-        self.set_body_velocity(0, 0, 0, immediate=True)
+    def stop_motors(self, immediate=True):
+        self.set_body_velocity(0, 0, 0, immediate=immediate)
 
-    def _set_motor_velocities(self):
+    def main(self):
         target_body_velocity = np.array((self._target_body_velocity,))
 
         if self._set_body_velocity_immediately:
@@ -143,7 +133,6 @@ class DriveMotorController(Thread):
         if max_motor_speed > 1:
             print('WARNING: Commanded to move motor(s) faster than their max speed; scaling down.')
             motor_speeds = motor_speeds / max_motor_speed
-            print('Scaled motor speeds [L, R, B]:', motor_speeds)
 
         self.set_motor_speeds(*motor_speeds)
         self._previous_body_velocity_timestamp = BodyVelocityTimestamp(BodyVelocity(*body_velocity[0]), time())
