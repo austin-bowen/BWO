@@ -2,10 +2,6 @@
 BWO the robot.
 """
 
-import sys
-
-from bwo.bwo import Bwo, BwoMode
-
 '''
 class VideoCapture(cv2.VideoCapture):
     def __enter__(self):
@@ -72,14 +68,3 @@ def cat_seeker(bwo: Bwo, controller: gamesir.GameSirController):
             bwo.drive_motors.set_body_velocity(0, 0.0, cat_offset[0] * 0.5)
             bwo.head.set_head_position(0)
 '''
-
-
-def main() -> int:
-    with Bwo(BwoMode.REMOTE_CONTROL) as bwo:
-        bwo.wait_for_shutdown()
-
-    return 0
-
-
-if __name__ == '__main__':
-    sys.exit(main())

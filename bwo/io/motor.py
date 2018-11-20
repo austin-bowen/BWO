@@ -1,15 +1,15 @@
 from copy import copy
 from enum import Enum
 from numbers import Real
-from time import time
 from typing import NamedTuple
 
 import numpy as np
 
-from bwo import settings
-from bwo.manager import ManagerThread
 from maestro import Maestro
 from servo_motor.model import ParallaxHighSpeedContinuousServoMotor
+from time import time
+from .. import settings
+from ..manager import ManagerThread
 
 
 class BodyVelocity:

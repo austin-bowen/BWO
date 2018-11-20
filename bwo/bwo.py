@@ -2,12 +2,12 @@ from enum import Enum
 from threading import Event
 from typing import Optional
 
-from bwo import events
-from bwo.io.controller import ControllerManager
-from bwo.io.head import Head
-from bwo.io.motor import DriveMotorController
 from gamesir import GameSirController as Controller
 from maestro import Maestro
+from . import events
+from .io.controller import ControllerManager
+from .io.head import Head
+from .io.motor import DriveMotorController
 
 
 class BwoMode(Enum):

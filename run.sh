@@ -2,5 +2,4 @@
 
 echo Starting BWO!
 
-export PYTHONPATH=.
-pipenv run python3 bwo/main.py
+pipenv run python3 run.py
