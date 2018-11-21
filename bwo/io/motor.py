@@ -111,14 +111,19 @@ class DriveMotorController(ManagerThread):
         self.set_body_velocity(0, 0, 0, immediate=immediate)
 
     def main(self):
-        target_body_velocity = np.array((self._target_body_velocity,))
+        target_body_velocity = self._target_body_velocity
+        target_body_velocity = np.array(((target_body_velocity.x, target_body_velocity.y, target_body_velocity.omega),))
 
         if self._set_body_velocity_immediately:
             self._set_body_velocity_immediately = False
             body_velocity = target_body_velocity
         else:
             previous_body_velocity, previous_time = self._previous_body_velocity_timestamp
-            previous_body_velocity = np.array(previous_body_velocity)
+            previous_body_velocity = np.array((
+                previous_body_velocity.x,
+                previous_body_velocity.y,
+                previous_body_velocity.omega
+            ))
 
             # Apply low-pass filter to the target body velocity
             dt = time() - previous_time
