@@ -24,6 +24,15 @@ class ManagerThread(Thread):
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.stop()
 
+    def log(self, message: str):
+        print(f'[{self.name}] {message}')
+
+    def log_error(self, message: str):
+        self.log(f'ERROR: {message}')
+
+    def log_warning(self, message: str):
+        self.log(f'WARNING: {message}')
+
     def main(self):
         raise NotImplementedError(f'{self.__class__}.main is not implemented.')
 
@@ -39,20 +48,20 @@ class ManagerThread(Thread):
                 stop_timeout = self.LOOP_PERIOD_S - (time() - t0)
                 if stop_timeout <= 0:
                     if not self._disable_loop_period_warning:
-                        print(f'WARNING: {self.name} loop period has fallen below {self.LOOP_PERIOD_S}s.')
+                        self.log_warning(f'Loop period has fallen below {self.LOOP_PERIOD_S}s.')
                     stop_timeout = 0
         else:
             while not self._stop_event.is_set():
                 self.main()
 
     def start(self):
-        print(f'Starting {self.name}... ', end='', flush=True)
+        self.log('Starting...')
         self._stop_event.clear()
         Thread.start(self)
-        print('Done.')
+        self.log('Done.')
 
     def stop(self, timeout: Optional[float] = None):
-        print(f'Stopping {self.name}... ', end='', flush=True)
+        self.log('Stopping...')
         self._stop_event.set()
         self.join(timeout=timeout)
-        print('Done.')
+        self.log('Done.')
