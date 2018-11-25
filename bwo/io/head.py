@@ -31,12 +31,16 @@ class Head(ManagerThread):
 
     def main(self):
         with PiCamera() as camera, PiRGBArray(camera) as camera_output:
+            camera.framerate = 10
+
             blackout_start_time = None
             t0 = time()
-            while not self._stop_event.is_set():
-                # Capture and send image from the camera in BGR order (rather than RGB) for OpenCV
-                camera.capture(camera_output, 'bgr')
-                image = camera_output.array
+            for image in camera.capture_continuous(camera_output, format='bgr', use_video_port=True):
+                if self._stop_event.is_set():
+                    break
+
+                # Send image from the camera in BGR order (rather than RGB) for OpenCV
+                image = image.array
                 send_new_camera_image_event(image)
 
                 # Blackout frame?
