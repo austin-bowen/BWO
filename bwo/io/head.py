@@ -23,6 +23,7 @@ class Head(ManagerThread):
 
     def __init__(self, maestro: Maestro):
         ManagerThread.__init__(self, name='Head')
+        self._disable_loop_period_warning = True
 
         self.maestro = maestro
         self.maestro.set_speed(self.NECK_CHANNEL, self.NECK_SPEED)
@@ -30,34 +31,39 @@ class Head(ManagerThread):
         self.set_head_position(0)
 
     def main(self):
-        with PiCamera() as camera, PiRGBArray(camera) as camera_output:
-            camera.framerate = 10
+        with PiCamera() as camera:
+            camera.framerate = 5
+            # camera.resolution = (640, 480)
+            camera.resolution = (320, 240)
 
-            blackout_start_time = None
-            t0 = time()
-            for image in camera.capture_continuous(camera_output, format='bgr', use_video_port=True):
-                if self._stop_event.is_set():
-                    break
+            with PiRGBArray(camera, size=camera.resolution) as camera_output:
+                blackout_start_time = None
+                t0 = time()
+                for image in camera.capture_continuous(camera_output, format='bgr', use_video_port=True):
+                    if self._stop_event.is_set():
+                        break
 
-                # Send image from the camera in BGR order (rather than RGB) for OpenCV
-                image = image.array
-                send_new_camera_image_event(image)
+                    # Send image from the camera in BGR order (rather than RGB) for OpenCV
+                    image = image.array
+                    send_new_camera_image_event(image)
+                    camera_output.truncate(0)
 
-                # Blackout frame?
-                if np.max(image) <= self.CAMERA_BLACKOUT_THRESHOLD:
-                    now = time()
-                    if blackout_start_time is None:
-                        blackout_start_time = now
-                    elif (now - blackout_start_time) >= self.CAMERA_BLACKOUT_TIMEOUT_S:
-                        print('Blackout timeout reached!')
-                        sleep(10)
-                else:
-                    blackout_start_time = None
+                    # Blackout frame?
+                    if np.max(image) <= self.CAMERA_BLACKOUT_THRESHOLD:
+                        print('It is dark!')
+                        now = time()
+                        if blackout_start_time is None:
+                            blackout_start_time = now
+                        elif (now - blackout_start_time) >= self.CAMERA_BLACKOUT_TIMEOUT_S:
+                            print('Blackout timeout reached!')
+                            sleep(10)
+                    else:
+                        blackout_start_time = None
 
-                # Print FPS
-                t1 = time()
-                print(f'{1 / (t1 - t0)} FPS')
-                t0 = t1
+                    # Print FPS
+                    t1 = time()
+                    print(f'{1 / (t1 - t0)} FPS')
+                    t0 = t1
 
     def set_head_position(self, position: Real):
         position = scale(position, Point(-1, 1000), Point(1, 2000))

@@ -48,7 +48,8 @@ class Bwo:
         )
 
         if self.mode == BwoMode.CAT_SEEKER:
-            self.cat_detector = cv2.CascadeClassifier('haarcascade_frontalcatface_extended.xml')
+            self.cat_detector = cv2.CascadeClassifier('haarcascade_frontalcatface.xml')
+            # self.cat_detector = cv2.CascadeClassifier('haarcascade_frontalcatface_extended.xml')
             events.receive_new_camera_image(self._new_camera_image_handler)
 
         events.receive_controller_events(self._controller_event_handler)
@@ -109,6 +110,7 @@ class Bwo:
             minSize=(10, 10)
         )
         if not len(cat_rects):
+            self.drive_motors.stop_motors()
             return
 
         # Pick the largest detected cat
@@ -131,7 +133,7 @@ class Bwo:
         del cat_center, frame_height, frame_width
 
         # Set the body velocity and head position
-        self.drive_motors.set_body_velocity(0, 0, cat_offset[0] * 0.5)
+        self.drive_motors.set_body_velocity(0, 0, cat_offset[0] * 0.25)
         self.head.set_head_position(0)
 
     def _shutdown_handler(self):

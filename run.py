@@ -13,7 +13,7 @@ def main() -> int:
 
     signal.signal(signal.SIGINT, handle_sigint)
 
-    with Bwo(BwoMode.REMOTE_CONTROL) as bwo:
+    with Bwo(BwoMode.CAT_SEEKER) as bwo:
         bwo.wait_for_shutdown()
 
     return 0
