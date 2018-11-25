@@ -1,21 +1,14 @@
 from numbers import Real
 from time import sleep, time
 
-import cv2
 import numpy as np
+from picamera import PiCamera
+from picamera.array import PiRGBArray
 
 from maestro import Maestro
 from servo_motor.abstract import Point, scale
 from ..events import send_new_camera_image_event
 from ..manager import ManagerThread
-
-
-class VideoCapture(cv2.VideoCapture):
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        self.release()
 
 
 class Head(ManagerThread):
@@ -37,21 +30,13 @@ class Head(ManagerThread):
         self.set_head_position(0)
 
     def main(self):
-        with VideoCapture(0) as camera:
+        with PiCamera() as camera, PiRGBArray(camera) as camera_output:
             blackout_start_time = None
-            prev_logged_error = False
             t0 = time()
             while not self._stop_event.is_set():
-                # Capture image from the camera
-                return_code, image = camera.read()
-                if not image:
-                    if not prev_logged_error:
-                        self.log_error(f'Failed to read camera image; return code {return_code}.')
-                        prev_logged_error = True
-                    continue
-                prev_logged_error = False
-
-                # Send image
+                # Capture and send image from the camera in BGR order (rather than RGB) for OpenCV
+                camera.capture(camera_output, 'bgr')
+                image = camera_output.array
                 send_new_camera_image_event(image)
 
                 # Blackout frame?
