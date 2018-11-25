@@ -10,6 +10,14 @@ from ..events import send_new_camera_image_event
 from ..manager import ManagerThread
 
 
+class VideoCapture(cv2.VideoCapture):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.release()
+
+
 class Head(ManagerThread):
     CAMERA_BLACKOUT_THRESHOLD = 20
     CAMERA_BLACKOUT_TIMEOUT_S = 10
@@ -29,7 +37,7 @@ class Head(ManagerThread):
         self.set_head_position(0)
 
     def main(self):
-        with cv2.VideoCapture(0) as camera:
+        with VideoCapture(0) as camera:
             blackout_start_time = None
             prev_logged_error = False
             t0 = time()
