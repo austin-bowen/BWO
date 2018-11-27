@@ -13,7 +13,6 @@ picamera = {extras = ["array"], version = "*"}
 
 [dev-packages]
 opencv-contrib-python = "*"
-opencv-python = "*"
 
 [require]
 python_version = "3.6"
