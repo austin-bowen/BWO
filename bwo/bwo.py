@@ -5,7 +5,7 @@ from typing import Optional
 import cv2
 
 from gamesir import GameSirController as Controller
-from maestro import Maestro
+from maestro import MicroMaestro
 from . import events
 from .io.controller import ControllerManager
 from .io.head import Head
@@ -35,7 +35,7 @@ class Bwo:
         self.mode = mode
 
         self.controller_manager = ControllerManager()
-        self.maestro = Maestro(is_micro=True)
+        self.maestro = MicroMaestro()
         self.head = Head(self.maestro)
         self.drive_motors = DriveMotorController(self.maestro)
 
