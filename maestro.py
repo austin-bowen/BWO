@@ -96,6 +96,7 @@ class Maestro:
     def __init__(
             self,
             is_micro: bool,
+            channels: int,
             tty: str = '/dev/ttyACM0',
             device: int = SerialCommands.DEFAULT_DEVICE_NUMBER,
             safe_close: bool = True,
@@ -103,6 +104,7 @@ class Maestro:
     ):
         """
         :param is_micro: Whether or not the device is the Micro Maestro, which lacks some functionality.
+        :param channels: Number of channels the Maestro has.
         :param tty:
         :param device:
         :param safe_close: If `True`, tells the Maestro to stop sending servo signals before closing the connection.
@@ -110,6 +112,7 @@ class Maestro:
         """
 
         self.is_micro = is_micro
+        self.channels = channels
 
         # Timeout of 0 corresponds to "non-blocking" mode, but we don't want that
         if timeout == 0 or timeout == 0.0:
@@ -127,11 +130,11 @@ class Maestro:
         self.safe_close = safe_close
 
         # Track target position for each servo
-        self.targets_us: List[Real] = [0] * 24
+        self.targets_us: List[Real] = [0] * channels
 
         # Servo minimum and maximum targets can be restricted to protect components
-        self.min_targets_us: List[Real] = [None] * 24
-        self.max_targets_us: List[Real] = [None] * 24
+        self.min_targets_us: List[Real] = [None] * channels
+        self.max_targets_us: List[Real] = [None] * channels
 
         self._closed = False
 
@@ -140,6 +143,10 @@ class Maestro:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
+
+    def _check_channel(self, channel: int):
+        if channel < 0 or channel >= self.channels:
+            raise ValueError(f'Invalid channel "{channel}"; available channels are 0 - {self.channels - 1}.')
 
     def _read(self, byte_count: int) -> bytes:
         """
@@ -163,7 +170,7 @@ class Maestro:
 
         with self._conn_lock:
             if self.safe_close:
-                for channel in range(24):
+                for channel in range(self.channels):
                     self.stop_channel(channel)
 
             self._conn.close()
@@ -241,6 +248,7 @@ class Maestro:
         values. Use the Maestro Control Center to configure ranges that are saved to the controller. Use setRange for
         software controllable ranges.
         """
+        self._check_channel(channel)
         self.min_targets_us[channel] = min_us
         self.max_targets_us[channel] = max_us
 
@@ -250,6 +258,7 @@ class Maestro:
 
         :param channel: PWM channel to stop sending PWM signals to.
         """
+        self._check_channel(channel)
         self.set_target(channel, 0)
 
     def stop_script(self):
@@ -258,10 +267,12 @@ class Maestro:
 
     def get_min(self, channel: int):
         """Return minimum channel range value."""
+        self._check_channel(channel)
         return self.min_targets_us[channel]
 
     def get_max(self, channel: int):
         """Return maximum channel range value."""
+        self._check_channel(channel)
         return self.max_targets_us[channel]
 
     def set_target(self, channel: int, target_us: Real):
@@ -274,6 +285,7 @@ class Maestro:
         Typically valid servo range is 3000 to 9000 quarter-microseconds
         If channel is configured for digital output, values < 6000 = Low output
         """
+        self._check_channel(channel)
 
         # If min is defined and target is below, force to min
         min_target_us = self.min_targets_us[channel]
@@ -353,7 +365,7 @@ class Maestro:
         For the standard 1ms pulse width change to move a servo between extremes, a speed
         of 1 will take 1 minute, and a speed of 60 would take 1 second. Speed of 0 is unrestricted.
         """
-
+        self._check_channel(channel)
         lsb, msb = _get_lsb_msb(speed)
         self.send_cmd(bytes((self.SerialCommands.SET_SPEED, channel, lsb, msb)))
 
@@ -364,11 +376,11 @@ class Maestro:
         Valid values are from 0 to 255. 0 = unrestricted, 1 is slowest start.
         A value of 1 will take the servo about 3s to move between 1ms to 2ms range.
         """
-
+        self._check_channel(channel)
         lsb, msb = _get_lsb_msb(acceleration)
         self.send_cmd(bytes((self.SerialCommands.SET_ACCELERATION, channel, lsb, msb)))
 
-    def get_position(self, chan: int) -> float:
+    def get_position(self, channel: int) -> float:
         """
         Get the current position of the device on the specified channel
         The result is returned in a measure of quarter-microseconds, which mirrors
@@ -380,9 +392,10 @@ class Maestro:
 
         :raises TimeoutError: Connection timed out.
         """
+        self._check_channel(channel)
 
         with self._conn_lock:
-            self.send_cmd(bytes((self.SerialCommands.GET_POSITION, chan)))
+            self.send_cmd(bytes((self.SerialCommands.GET_POSITION, channel)))
             data = self._read(2)
 
         return (data[0] << 8 | data[1]) / 4
@@ -397,6 +410,7 @@ class Maestro:
         channel, then the target can never be reached, so it will appear to always be
         moving to the target.
         """
+        self._check_channel(channel)
         target_us = self.targets_us[channel]
         return target_us and abs(target_us - self.get_position(channel)) < 0.01
 
@@ -446,6 +460,26 @@ class Maestro:
             parameter_lsb,
             parameter_msb
         )))
+
+
+class MicroMaestro(Maestro):
+    def __init__(self, **kwargs):
+        Maestro.__init__(self, True, 6, **kwargs)
+
+
+class MiniMaestro12(Maestro):
+    def __init__(self, **kwargs):
+        Maestro.__init__(self, False, 12, **kwargs)
+
+
+class MiniMaestro16(Maestro):
+    def __init__(self, **kwargs):
+        Maestro.__init__(self, False, 16, **kwargs)
+
+
+class MiniMaestro24(Maestro):
+    def __init__(self, **kwargs):
+        Maestro.__init__(self, False, 24, **kwargs)
 
 
 class MicroMaestroNotSupportedError(Exception):
