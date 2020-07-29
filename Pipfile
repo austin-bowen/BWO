@@ -1,19 +1,16 @@
 [[source]]
-#url = "https://pypi.org/simple"
-url = "https://piwheels.org/simple"
-verify_ssl = true
 name = "pypi"
-
-[packages]
-evdev = "*"
-numpy = "*"
-pyserial = "*"
-Pypubsub = "*"
-picamera = {extras = ["array"], version = "*"}
-#smbus = "*"
+url = "https://pypi.org/simple"
+verify_ssl = true
 
 [dev-packages]
-opencv-contrib-python = "*"
 
-[require]
-python_version = "3.6"
+[packages]
+pyserial = "*"
+evdev = "*"
+pypubsub = "*"
+picamera = "*"
+numpy = "*"
+
+[requires]
+python_version = "3.8"
