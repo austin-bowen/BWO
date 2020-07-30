@@ -280,13 +280,14 @@ void loop() {
 
   //main2(LOOP_MS);
   //main3(LOOP_MS);
-  main4();
+  //main4();
+  process_command();
 
   // Delay
-  const unsigned long proc_ms = (micros() - t0) / 1000;
-  if (LOOP_MS - proc_ms > 0) {
-    //delay(LOOP_MS - proc_ms);
-  }
+  //const unsigned long proc_ms = (micros() - t0) / 1000;
+  //if (LOOP_MS - proc_ms > 0) {
+  //  delay(LOOP_MS - proc_ms);
+  //}
 }
 
 
@@ -303,31 +304,49 @@ void process_command() {
   const static byte ACK = 0xAA;
   const static byte NCK = 0xFF;
 
+  static short  left_motor_velocity = 0;
+  static short right_motor_velocity = 0;
+  static unsigned long last_command_time = 0;
+
+  if ((millis() - last_command_time) > 5000) {
+    left_motor_velocity = right_motor_velocity = 0;
+  }
+
+  left_motor.SetTargetVelocity(left_motor_velocity);
+  right_motor.SetTargetVelocity(right_motor_velocity);
+  left_motor.debug = right_motor.debug = false;
+
   if (!Serial.available()) {
     return;
   }
 
   const byte command = Serial.peek();
-  if (command == 0x11) {
-    if (!Serial.available() >= 5) {
+  if (command == 0xC0) {
+    if (Serial.available() < 5) {
       return;
     }
 
     Serial.read();  // Discard the command
-    const short  left_motor_velocity = (Serial.read() << 8) | Serial.read();
-    const short right_motor_velocity = (Serial.read() << 8) | Serial.read();
+    left_motor_velocity = (Serial.read() << 8) | Serial.read();
+    right_motor_velocity = (Serial.read() << 8) | Serial.read();
 
     // Set motor velocities
     // ...
 
     // Get motor velocities and bumper states
-    // ...
+    const short  actual_left_motor_velocity =  left_motor.GetActualVelocity();
+    const short actual_right_motor_velocity = right_motor.GetActualVelocity();
     const byte bumpers = left_bumper << 2 | middle_bumper << 1 | right_bumper;
 
     // Send the ACK and states
     Serial.write(ACK);
-    // ...
+    Serial.write(( actual_left_motor_velocity & 0xFF00) >> 8);
+    Serial.write(( actual_left_motor_velocity & 0xFF));
+    Serial.write((actual_right_motor_velocity & 0xFF00) >> 8);
+    Serial.write((actual_right_motor_velocity & 0xFF));
     Serial.write(bumpers);
+
+    last_command_time = millis();
   }
 
   else if (command == 0x22) {
