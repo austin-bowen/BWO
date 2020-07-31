@@ -22,22 +22,22 @@ def main():
             if event.type not in controller.EVENT_TYPES:
                 continue
 
-            #print(GameSirController.EventCode(event.code), event.value)
-
-            if event.type == controller.EventCode.LEFT_JOYSTICK_Y:
+            #print(controller.EventCode(event.code), event.value)
+            
+            if controller.EventCode(event.code) == controller.EventCode.LEFT_JOYSTICK_Y:
                 value = event.value
                 # Scale from [0, 255] to [-1., 1.]
                 value = (value - 128) / 128
                 # Scale from [-1., 1.] to [-50, 50]
-                value *= 50
+                value *= -50
                 lv = int(value)
 
-            elif event.type == controller.EventCode.RIGHT_JOYSTICK_Y:
+            elif controller.EventCode(event.code) == controller.EventCode.RIGHT_JOYSTICK_Y:
                 value = event.value
                 # Scale from [0, 255] to [-1., 1.]
                 value = (value - 128) / 128
                 # Scale from [-1., 1.] to [-50, 50]
-                value *= 50
+                value *= -50
                 rv = int(value)
 
             else:
