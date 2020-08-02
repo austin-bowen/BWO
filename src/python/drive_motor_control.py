@@ -140,6 +140,10 @@ class DriveMotorController(Thread):
 def main():
     import gamesir
 
+    normal_speed = 50
+    turbo_speed = 100
+    turbo = False
+
     print('Connecting to GameSir controller...')
     controller = gamesir.get_controllers()[0]
 
@@ -147,29 +151,32 @@ def main():
     with DriveMotorController() as drive_motors:
         print('Connected.\n')
 
-        lv = rv = 0
+        lv_scale = rv_scale = 0
         for event in controller.read_loop():
             if event.type not in controller.EVENT_TYPES:
                 continue
 
-            if controller.EventCode(event.code) == controller.EventCode.LEFT_JOYSTICK_Y:
-                value = event.value
-                # Scale from [0, 255] to [-1., 1.]
-                value = (value - 128) / 128
-                # Scale from [-1., 1.] to [-50, 50]
-                value *= -50
-                lv = int(value)
+            event_code = controller.EventCode(event.code)
 
-            elif controller.EventCode(event.code) == controller.EventCode.RIGHT_JOYSTICK_Y:
+            if event_code == controller.EventCode.LEFT_JOYSTICK_Y:
                 value = event.value
-                # Scale from [0, 255] to [-1., 1.]
-                value = (value - 128) / 128
-                # Scale from [-1., 1.] to [-50, 50]
-                value *= -50
-                rv = int(value)
+                # Scale from [255, 0] to [-1., 1.]
+                lv_scale = - (value - 128) / 128
+
+            elif event_code == controller.EventCode.RIGHT_JOYSTICK_Y:
+                value = event.value
+                # Scale from [255, 0] to [-1., 1.]
+                rv_scale = - (value - 128) / 128
+
+            elif event_code == controller.EventCode.RIGHT_TRIGGER_PRESSURE:
+                turbo = event.value >= 200
 
             else:
                 continue
+
+            max_speed = turbo_speed if turbo else normal_speed
+            lv = max_speed * lv_scale
+            rv = max_speed * rv_scale
 
             print(f'LV: {lv} \tRV: {rv}')
             print(drive_motors.set_velocity_differential(lv, rv))
