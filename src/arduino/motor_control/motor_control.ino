@@ -27,7 +27,8 @@
 #define LEFT 2
 #define RIGHT 1
 #define MIN_MOTOR_PWM 1
-#define MAX_MOTOR_PWM 128
+//#define MAX_MOTOR_PWM 128
+#define MAX_MOTOR_PWM 192
 
 
 typedef signed long ticks_t;
