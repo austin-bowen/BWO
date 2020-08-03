@@ -11,6 +11,7 @@ WHEEL_DIA_CM = 13.5
 WHEEL_CIR_CM = pi * WHEEL_DIA_CM
 WHEEL_CM_PER_TICK = WHEEL_CIR_CM / ENCODER_PPR
 WHEEL_TICK_PER_CM = ENCODER_PPR / WHEEL_CIR_CM
+WHEEL_TRACK_CM = 28
 
 # Types
 Real = Union[float, int]
@@ -100,6 +101,20 @@ class DriveMotorController(Thread):
 
             return self._send_set_velocity_command()
 
+    def set_velocity_steer(self, linear_velocity: Real, angular_velocity: Real) -> DriveMotorState:
+        """
+        :param linear_velocity: [cm / s]
+        :param angular_velocity: [deg / s]
+        """
+
+        # a = (WHEEL_TRACK_CM / 100) / 2
+        # Had to determine the 5 / 6 heuristically :/
+        a = (WHEEL_TRACK_CM / 100) * (5 / 6)
+        left_motor_velocity = linear_velocity - angular_velocity * a
+        right_motor_velocity = linear_velocity + angular_velocity * a
+
+        return self.set_velocity_differential(left_motor_velocity, right_motor_velocity, distance_unit='cm')
+
     def stop_motors(self) -> DriveMotorState:
         return self.set_velocity_differential(0, 0)
 
@@ -137,7 +152,7 @@ class DriveMotorController(Thread):
         )
 
 
-def main():
+def test_set_velocity_differential_gamesir(drive_motors: DriveMotorController):
     import gamesir
 
     normal_speed = 50
@@ -146,43 +161,103 @@ def main():
 
     print('Connecting to GameSir controller...')
     controller = gamesir.get_controllers()[0]
+    print('Connected.')
 
+    lv_scale = rv_scale = 0
+    for event in controller.read_loop():
+        if event.type not in controller.EVENT_TYPES:
+            continue
+
+        event_code = controller.EventCode(event.code)
+
+        if event_code == controller.EventCode.LEFT_JOYSTICK_Y:
+            value = event.value
+            # Scale from [255, 0] to [-1., 1.]
+            lv_scale = - (value - 128) / 128
+
+        elif event_code == controller.EventCode.RIGHT_JOYSTICK_Y:
+            value = event.value
+            # Scale from [255, 0] to [-1., 1.]
+            rv_scale = - (value - 128) / 128
+
+        elif event_code == controller.EventCode.RIGHT_TRIGGER_PRESSURE:
+            turbo = event.value >= 200
+
+        else:
+            continue
+
+        max_speed = turbo_speed if turbo else normal_speed
+        lv = max_speed * lv_scale
+        rv = max_speed * rv_scale
+
+        print(f'LV: {lv} \tRV: {rv}')
+        print(drive_motors.set_velocity_differential(lv, rv))
+
+
+def test_set_velocity_steer_gamesir(drive_motors: DriveMotorController):
+    import gamesir
+
+    normal_speed = 40
+    turbo_speed = 80
+    turbo = False
+
+    print('Connecting to GameSir controller...')
+    controller = gamesir.get_controllers()[0]
+    print('Connected.')
+
+    v_scale = w_scale = 0
+    for event in controller.read_loop():
+        if event.type not in controller.EVENT_TYPES:
+            continue
+
+        event_code = controller.EventCode(event.code)
+
+        if event_code == controller.EventCode.LEFT_JOYSTICK_Y:
+            value = event.value
+            # Scale from [255, 0] to [-1., 1.]
+            v_scale = - (value - 128) / 128
+
+        elif event_code == controller.EventCode.LEFT_JOYSTICK_X:
+            value = event.value
+            # Scale from [255, 0] to [-1., 1.]
+            w_scale = - (value - 128) / 128
+
+        elif event_code == controller.EventCode.RIGHT_TRIGGER_PRESSURE:
+            turbo = event.value >= 200
+
+        else:
+            continue
+
+        max_speed = turbo_speed if turbo else normal_speed
+
+        v = max_speed * v_scale
+        w = 90 * w_scale
+        print(f'v: {v} \tw: {w}')
+        print(drive_motors.set_velocity_steer(v, w if v >= 0 else -w))
+
+
+def test_set_velocity_steer_cli(drive_motors: DriveMotorController):
+    while True:
+        try:
+            result = input('[v,w]: ')
+            v, w = result.split(',')
+            v, w = float(v), float(w)
+        except KeyboardInterrupt:
+            break
+        except Exception as e:
+            print(e)
+            continue
+
+        print(drive_motors.set_velocity_steer(v, w))
+
+
+def main():
     print('Connecting to drive motor controller...')
     with DriveMotorController() as drive_motors:
         print('Connected.\n')
 
-        lv_scale = rv_scale = 0
-        for event in controller.read_loop():
-            if event.type not in controller.EVENT_TYPES:
-                continue
-
-            event_code = controller.EventCode(event.code)
-
-            if event_code == controller.EventCode.LEFT_JOYSTICK_Y:
-                value = event.value
-                # Scale from [255, 0] to [-1., 1.]
-                lv_scale = - (value - 128) / 128
-
-            elif event_code == controller.EventCode.RIGHT_JOYSTICK_Y:
-                value = event.value
-                # Scale from [255, 0] to [-1., 1.]
-                rv_scale = - (value - 128) / 128
-
-            elif event_code == controller.EventCode.RIGHT_TRIGGER_PRESSURE:
-                turbo = event.value >= 200
-
-            else:
-                continue
-
-            max_speed = turbo_speed if turbo else normal_speed
-            lv = max_speed * lv_scale
-            rv = max_speed * rv_scale
-
-            print(f'LV: {lv} \tRV: {rv}')
-            print(drive_motors.set_velocity_differential(lv, rv))
-
-        print('\nDisconnecting from microcontroller...')
-    print('Disconnected.')
+        # test_set_velocity_steer_cli(drive_motors)
+        test_set_velocity_steer_gamesir(drive_motors)
 
 
 if __name__ == '__main__':
