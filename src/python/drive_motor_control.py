@@ -234,6 +234,7 @@ def test_set_velocity_steer_gamesir(drive_motors: DriveMotorController):
         w = 90 * w_scale
         print(f'v: {v} \tw: {w}')
         print(drive_motors.set_velocity_steer(v, w if v >= 0 else -w))
+        print(drive_motors.set_velocity_steer(v, w))
 
 
 def test_set_velocity_steer_cli(drive_motors: DriveMotorController):
