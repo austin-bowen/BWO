@@ -103,15 +103,15 @@ class DriveMotorController(Thread):
 
     def set_velocity_steer(self, linear_velocity: Real, angular_velocity: Real) -> DriveMotorState:
         """
-        :param linear_velocity: [cm / s]
-        :param angular_velocity: [deg / s]
+        :param linear_velocity: How fast the robot should travel [cm / s]
+        :param angular_velocity: How fast the robot should rotate [deg / s]
         """
 
-        # a = (WHEEL_TRACK_CM / 100) / 2
-        # Had to determine the 5 / 6 heuristically :/
-        a = (WHEEL_TRACK_CM / 100) * (5 / 6)
-        left_motor_velocity = linear_velocity - angular_velocity * a
-        right_motor_velocity = linear_velocity + angular_velocity * a
+        # Convert angular velocity from [deg / s] of the body to [cm / s] of the wheel
+        angular_velocity = pi * WHEEL_TRACK_CM * (angular_velocity / 360)
+        
+        left_motor_velocity = linear_velocity - angular_velocity
+        right_motor_velocity = linear_velocity + angular_velocity
 
         return self.set_velocity_differential(left_motor_velocity, right_motor_velocity, distance_unit='cm')
 
