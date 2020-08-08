@@ -1,6 +1,7 @@
 import struct
 import time
-from math import pi
+import traceback
+from math import pi, cos, sin, radians
 from threading import Event, RLock, Thread
 from typing import NamedTuple, Union, Optional, Literal, Tuple
 
@@ -34,6 +35,15 @@ class DriveMotorState(NamedTuple):
 
 
 class DriveMotorController(Thread):
+    """
+    Drive Motor Controller
+
+    Properties:
+      ``state_change_callbacks`` -- A set of functions that will be called each time a new DriveMotorState is created.
+      The function must take arguments of type ``(DriveMotorController, DriveMotorState)``.
+
+    """
+
     _ACK = b'\xAA'
     _SET_VELOCITY_COMMAND = b'\xC0'
     _SET_VELOCITY_RECV_STRUCT = struct.Struct('>chh')
@@ -56,6 +66,10 @@ class DriveMotorController(Thread):
 
         self.target_left_motor_velocity = 0.0
         self.target_right_motor_velocity = 0.0
+
+        self.state_change_callbacks = set()
+
+        self.set_velocity_differential(0, 0)
 
         self.start()
 
@@ -122,29 +136,32 @@ class DriveMotorController(Thread):
 
     def _send_set_velocity_command(self) -> DriveMotorState:
         with self._lock:
-            send_data = self._SET_VELOCITY_RECV_STRUCT.pack(
+            # Send the bytes for the "set velocity" command
+            self._conn.write(self._SET_VELOCITY_RECV_STRUCT.pack(
                 self._SET_VELOCITY_COMMAND,
                 int(round(self.target_left_motor_velocity)),
                 int(round(self.target_right_motor_velocity))
-            )
-
-            self._conn.write(send_data)
+            ))
             self._conn.flush()
 
+            # Grab the current time and receive the response byte (either ACK or NCK)
             timestamp = time.monotonic()
             response = self._conn.read()
             if response != self._ACK:
                 raise DriveMotorException('Did not receive ACK from the controller!')
 
+            # Receive and unpack the response bytes
             left_motor_position, left_motor_velocity, right_motor_position, right_motor_velocity, bumpers = \
-                self._SET_VELOCITY_SEND_STRUCT.unpack(self._conn.read(13))
+                self._SET_VELOCITY_SEND_STRUCT.unpack(self._conn.read(self._SET_VELOCITY_SEND_STRUCT.size))
 
+        # Interpret the bumpers byte
         bumpers = bumpers[0]
         left_bumper = bool(bumpers & 0x04)
         middle_bumper = bool(bumpers & 0x02)
         right_bumper = bool(bumpers & 0x01)
 
-        return DriveMotorState(
+        # Build a new drive motor state
+        state = DriveMotorState(
             timestamp,
             left_motor_position,
             left_motor_velocity,
@@ -154,6 +171,18 @@ class DriveMotorController(Thread):
             middle_bumper,
             right_bumper
         )
+
+        # Notify callback subscribers of new drive motor state
+        for callback in self.state_change_callbacks:
+            try:
+                callback(self, state)
+            except RuntimeError:
+                raise
+            except:
+                print(f'Exception occurred while running callback {callback!r}:')
+                traceback.print_last()
+
+        return state
 
 
 def differential_to_unicycle(left_motor_velocity: Real, right_motor_velocity: Real) -> Tuple[Real, Real]:
@@ -261,6 +290,8 @@ def test_set_velocity_unicycle_gamesir(drive_motors: DriveMotorController):
     turbo = False
 
     prev_state = drive_motors.set_velocity_differential(0, 0)
+    x = y = 0
+    heading = 90
 
     print('Connecting to GameSir controller...')
     controller = gamesir.get_controllers()[0]
@@ -298,11 +329,23 @@ def test_set_velocity_unicycle_gamesir(drive_motors: DriveMotorController):
         state = drive_motors.set_velocity_unicycle(v, w)
 
         dt = state.timestamp - prev_state.timestamp
-        left_motor_velocity = ticks_to_distance(state.left_motor_position - prev_state.left_motor_position) / dt
-        right_motor_velocity = ticks_to_distance(state.right_motor_position - prev_state.right_motor_position) / dt
+        d_left_motor_position = ticks_to_distance(state.left_motor_position - prev_state.left_motor_position)
+        d_right_motor_position = ticks_to_distance(state.right_motor_position - prev_state.right_motor_position)
 
-        v, w = differential_to_unicycle(left_motor_velocity, right_motor_velocity)
-        print(f'Actual :  v:{v:5.2f}  w:{w:5.2f}')
+        v, w = differential_to_unicycle(d_left_motor_position / dt, d_right_motor_position / dt)
+
+        d_heading = w * dt
+        distance = v * dt
+        # TODO: This is not a perfectly accurate calculation; update to use arc calculations.
+        theta = heading + (d_heading / 2)
+        dx = distance * cos(radians(theta))
+        dy = distance * sin(radians(theta))
+
+        heading += d_heading
+        x += dx
+        y += dy
+
+        print(f'Actual :  v:{v:6.2f}  w:{w:6.2f}  x:{x:6.2f}  y:{y:6.2f}  heading:{int(round(heading))}')
 
         prev_state = state
 
