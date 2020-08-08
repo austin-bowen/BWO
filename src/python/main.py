@@ -26,15 +26,23 @@ class Point:
 
 
 def test_waypoint_following():
+    # waypoints = (
+    #     Point(0, 0),
+    #     Point(0, 50),
+    #     Point(50, 50),
+    #     Point(50, 0),
+    #     Point(100, 0),
+    #     Point(100, 50),
+    #     Point(50, 50),
+    #     Point(50, 0),
+    # )
+    # Starting point in kitchen: -2.5, 4.5
     waypoints = (
         Point(0, 0),
-        Point(0, 50),
-        Point(50, 50),
-        Point(50, 0),
-        Point(100, 0),
-        Point(100, 50),
-        Point(50, 50),
-        Point(50, 0),
+        Point(0, 320),
+        Point(137, 320),
+        Point(206, 251),
+        Point(206, 0),
     )
     waypoints = itertools.cycle(waypoints)
 
@@ -43,7 +51,7 @@ def test_waypoint_following():
 
     orientation = Orientation()
 
-    with DriveMotorController('/dev/ttyACM5') as drive_motors:
+    with DriveMotorController('/dev/ttyACM7') as drive_motors:
         drive_motors.state_change_callbacks.add(orientation.drive_motor_state_change_callback)
 
         waypoint = next(waypoints)
