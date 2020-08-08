@@ -1,7 +1,8 @@
 import struct
+import time
 from math import pi
 from threading import Event, RLock, Thread
-from typing import NamedTuple, Union, Optional, Literal
+from typing import NamedTuple, Union, Optional, Literal, Tuple
 
 import serial
 
@@ -22,6 +23,7 @@ class DriveMotorException(Exception):
 
 
 class DriveMotorState(NamedTuple):
+    timestamp: float
     left_motor_position: Real
     left_motor_velocity: Real
     right_motor_position: Real
@@ -86,34 +88,32 @@ class DriveMotorController(Thread):
             distance_unit: Literal['cm', 'ticks'] = 'cm'
     ) -> DriveMotorState:
         if distance_unit == 'cm':
-            scalar = WHEEL_TICK_PER_CM
+            left_motor_velocity = distance_to_ticks(left_motor_velocity)
+            right_motor_velocity = distance_to_ticks(right_motor_velocity)
         elif distance_unit == 'ticks':
-            scalar = 1
+            pass
         else:
             raise ValueError(f'Unrecognized distance_unit "{distance_unit}".')
 
         with self._lock:
             if left_motor_velocity is not None:
-                self.target_left_motor_velocity = left_motor_velocity * scalar
+                self.target_left_motor_velocity = left_motor_velocity
 
             if right_motor_velocity is not None:
-                self.target_right_motor_velocity = right_motor_velocity * scalar
+                self.target_right_motor_velocity = right_motor_velocity
 
             return self._send_set_velocity_command()
 
-    def set_velocity_steer(self, linear_velocity: Real, angular_velocity: Real) -> DriveMotorState:
+    def set_velocity_unicycle(self, linear_velocity: Real, angular_velocity: Real) -> DriveMotorState:
         """
         :param linear_velocity: How fast the robot should travel [cm / s]
         :param angular_velocity: How fast the robot should rotate [deg / s]
         """
 
-        # Convert angular velocity from [deg / s] of the body to [cm / s] of the wheel
-        angular_velocity = pi * WHEEL_TRACK_CM * (angular_velocity / 360)
-        
-        left_motor_velocity = linear_velocity - angular_velocity
-        right_motor_velocity = linear_velocity + angular_velocity
-
-        return self.set_velocity_differential(left_motor_velocity, right_motor_velocity, distance_unit='cm')
+        return self.set_velocity_differential(
+            *unicycle_to_differential(linear_velocity, angular_velocity),
+            distance_unit='cm'
+        )
 
     def stop_motors(self) -> DriveMotorState:
         return self.set_velocity_differential(0, 0)
@@ -129,6 +129,7 @@ class DriveMotorController(Thread):
             self._conn.write(send_data)
             self._conn.flush()
 
+            timestamp = time.monotonic()
             response = self._conn.read()
             if response != self._ACK:
                 raise DriveMotorException('Did not receive ACK from the controller!')
@@ -142,6 +143,7 @@ class DriveMotorController(Thread):
         right_bumper = bool(bumpers & 0x01)
 
         return DriveMotorState(
+            timestamp,
             left_motor_position,
             left_motor_velocity,
             right_motor_position,
@@ -150,6 +152,61 @@ class DriveMotorController(Thread):
             middle_bumper,
             right_bumper
         )
+
+
+def differential_to_unicycle(left_motor_velocity: Real, right_motor_velocity: Real) -> Tuple[Real, Real]:
+    """
+    Convert differential steering commands into unicycle steering commands.
+
+    :param left_motor_velocity: [cm / s]
+    :param right_motor_velocity: [cm / s]
+    :return: A tuple containing (linear_velocity [cm / s], angular_velocity [deg / s])
+    """
+
+    linear_velocity = (left_motor_velocity + right_motor_velocity) / 2
+    angular_velocity = (180 / (pi * WHEEL_TRACK_CM)) * (right_motor_velocity - left_motor_velocity)
+
+    return linear_velocity, angular_velocity
+
+
+def unicycle_to_differential(linear_velocity: Real, angular_velocity: Real) -> Tuple[Real, Real]:
+    """
+    Convert unicycle steering commands into differential steering commands.
+
+    :param linear_velocity: How fast the robot should travel [cm / s]
+    :param angular_velocity: How fast the robot should rotate [deg / s]
+    :return: A tuple containing (left_motor_velocity, right_motor_velocity) [cm / s]
+    """
+
+    # Convert angular velocity from [deg / s] of the body to [cm / s] of the wheel
+    angular_velocity = pi * WHEEL_TRACK_CM * (angular_velocity / 360)
+
+    left_motor_velocity = linear_velocity - angular_velocity
+    right_motor_velocity = linear_velocity + angular_velocity
+
+    return left_motor_velocity, right_motor_velocity
+
+
+def ticks_to_distance(ticks: int) -> Real:
+    """
+    Convert encoder ticks into distance [cm].
+
+    :param ticks: Number of encoder ticks.
+    :return: Distance that number of ticks represents [cm].
+    """
+
+    return ticks * WHEEL_CM_PER_TICK
+
+
+def distance_to_ticks(distance: Real) -> int:
+    """
+    Convert distance [cm] into encoder ticks.
+
+    :param distance: [cm]
+    :return: Number of encoder ticks (rounded) that distance represents.
+    """
+
+    return int(round(distance * WHEEL_TICK_PER_CM))
 
 
 def test_set_velocity_differential_gamesir(drive_motors: DriveMotorController):
@@ -194,12 +251,14 @@ def test_set_velocity_differential_gamesir(drive_motors: DriveMotorController):
         print(drive_motors.set_velocity_differential(lv, rv))
 
 
-def test_set_velocity_steer_gamesir(drive_motors: DriveMotorController):
+def test_set_velocity_unicycle_gamesir(drive_motors: DriveMotorController):
     import gamesir
 
     normal_speed = 40
     turbo_speed = 80
     turbo = False
+
+    prev_state = drive_motors.set_velocity_differential(0, 0)
 
     print('Connecting to GameSir controller...')
     controller = gamesir.get_controllers()[0]
@@ -232,9 +291,16 @@ def test_set_velocity_steer_gamesir(drive_motors: DriveMotorController):
 
         v = max_speed * v_scale
         w = 90 * w_scale
-        print(f'v: {v} \tw: {w}')
-        print(drive_motors.set_velocity_steer(v, w if v >= 0 else -w))
-        print(drive_motors.set_velocity_steer(v, w))
+        print(f'Desired:  v:{v} \tw:{w}')
+
+        state = drive_motors.set_velocity_unicycle(v, w)
+
+        dt = state.timestamp - prev_state.timestamp
+        left_motor_velocity = (state.left_motor_position - prev_state.left_motor_position) / dt
+        right_motor_velocity = (state.right_motor_position - prev_state.right_motor_position) / dt
+
+        v, w = differential_to_unicycle(left_motor_velocity, right_motor_velocity)
+        print(f'Actual :  v:{v} \tw:{w}')
 
 
 def test_set_velocity_steer_cli(drive_motors: DriveMotorController):
@@ -249,7 +315,7 @@ def test_set_velocity_steer_cli(drive_motors: DriveMotorController):
             print(e)
             continue
 
-        print(drive_motors.set_velocity_steer(v, w))
+        print(drive_motors.set_velocity_unicycle(v, w))
 
 
 def main():
@@ -258,7 +324,7 @@ def main():
         print('Connected.\n')
 
         # test_set_velocity_steer_cli(drive_motors)
-        test_set_velocity_steer_gamesir(drive_motors)
+        test_set_velocity_unicycle_gamesir(drive_motors)
 
 
 if __name__ == '__main__':
