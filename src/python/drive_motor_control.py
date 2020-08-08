@@ -324,7 +324,7 @@ def test_set_velocity_unicycle_gamesir(drive_motors: DriveMotorController):
 
         v = max_speed * v_scale
         w = 90 * w_scale
-        print(f'Desired:  v:{v:5.2f}  w:{w:5.2f}')
+        print(f'Desired:  v:{v:6.1f}  w:{w:6.1f}')
 
         state = drive_motors.set_velocity_unicycle(v, w)
 
@@ -341,11 +341,11 @@ def test_set_velocity_unicycle_gamesir(drive_motors: DriveMotorController):
         dx = distance * cos(radians(theta))
         dy = distance * sin(radians(theta))
 
-        heading += d_heading
+        heading = (heading + d_heading) % 360
         x += dx
         y += dy
 
-        print(f'Actual :  v:{v:6.2f}  w:{w:6.2f}  x:{x:6.2f}  y:{y:6.2f}  heading:{int(round(heading))}')
+        print(f'Actual :  v:{v:6.1f}  w:{w:6.1f}  x:{x:6.1f}  y:{y:6.1f}  heading:{int(round(heading))}')
 
         prev_state = state
 
@@ -367,7 +367,7 @@ def test_set_velocity_steer_cli(drive_motors: DriveMotorController):
 
 def main():
     print('Connecting to drive motor controller...')
-    with DriveMotorController('/dev/ttyACM3') as drive_motors:
+    with DriveMotorController('/dev/ttyACM5') as drive_motors:
         print('Connected.\n')
 
         # test_set_velocity_steer_cli(drive_motors)
