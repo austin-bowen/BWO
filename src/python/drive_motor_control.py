@@ -41,13 +41,15 @@ class DriveMotorController(Thread):
 
     def __init__(
             self,
-            controller_serial_port: str = '/dev/ttyACM0',
+            controller_serial_port: str,
             baudrate: int = 115200,
+            timeout: Optional[Union[float, int]] = 1,
             set_velocity_resend_period: Optional[float] = 1.0
     ) -> None:
         super().__init__(name='DriveMotorControllerThread', daemon=True)
 
-        self._conn = serial.Serial(port=controller_serial_port, baudrate=baudrate)
+        self._conn = serial.Serial(port=controller_serial_port, baudrate=baudrate, timeout=timeout)
+        serial.Serial()
         self._lock = RLock()
         self._set_velocity_resend_period = set_velocity_resend_period
         self._stop_event = Event()
@@ -291,16 +293,18 @@ def test_set_velocity_unicycle_gamesir(drive_motors: DriveMotorController):
 
         v = max_speed * v_scale
         w = 90 * w_scale
-        print(f'Desired:  v:{v} \tw:{w}')
+        print(f'Desired:  v:{v:5.2f}  w:{w:5.2f}')
 
         state = drive_motors.set_velocity_unicycle(v, w)
 
         dt = state.timestamp - prev_state.timestamp
-        left_motor_velocity = (state.left_motor_position - prev_state.left_motor_position) / dt
-        right_motor_velocity = (state.right_motor_position - prev_state.right_motor_position) / dt
+        left_motor_velocity = ticks_to_distance(state.left_motor_position - prev_state.left_motor_position) / dt
+        right_motor_velocity = ticks_to_distance(state.right_motor_position - prev_state.right_motor_position) / dt
 
         v, w = differential_to_unicycle(left_motor_velocity, right_motor_velocity)
-        print(f'Actual :  v:{v} \tw:{w}')
+        print(f'Actual :  v:{v:5.2f}  w:{w:5.2f}')
+
+        prev_state = state
 
 
 def test_set_velocity_steer_cli(drive_motors: DriveMotorController):
@@ -320,7 +324,7 @@ def test_set_velocity_steer_cli(drive_motors: DriveMotorController):
 
 def main():
     print('Connecting to drive motor controller...')
-    with DriveMotorController() as drive_motors:
+    with DriveMotorController('/dev/ttyACM3') as drive_motors:
         print('Connected.\n')
 
         # test_set_velocity_steer_cli(drive_motors)
