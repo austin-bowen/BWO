@@ -1,7 +1,7 @@
 import struct
 import time
 import traceback
-from math import pi, cos, sin, radians
+from math import pi
 from threading import Event, RLock, Thread
 from typing import NamedTuple, Union, Optional, Literal, Tuple
 
@@ -290,8 +290,6 @@ def test_set_velocity_unicycle_gamesir(drive_motors: DriveMotorController):
     turbo = False
 
     prev_state = drive_motors.set_velocity_differential(0, 0)
-    x = y = 0
-    heading = 90
 
     print('Connecting to GameSir controller...')
     controller = gamesir.get_controllers()[0]
@@ -334,18 +332,7 @@ def test_set_velocity_unicycle_gamesir(drive_motors: DriveMotorController):
 
         v, w = differential_to_unicycle(d_left_motor_position / dt, d_right_motor_position / dt)
 
-        d_heading = w * dt
-        distance = v * dt
-        # TODO: This is not a perfectly accurate calculation; update to use arc calculations.
-        theta = heading + (d_heading / 2)
-        dx = distance * cos(radians(theta))
-        dy = distance * sin(radians(theta))
-
-        heading = (heading + d_heading) % 360
-        x += dx
-        y += dy
-
-        print(f'Actual :  v:{v:6.1f}  w:{w:6.1f}  x:{x:6.1f}  y:{y:6.1f}  heading:{int(round(heading))}')
+        print(f'Actual :  v:{v:6.1f}  w:{w:6.1f}')
 
         prev_state = state
 
