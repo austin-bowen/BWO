@@ -33,6 +33,21 @@
 
 typedef signed long ticks_t;
 
+union {
+  float value;
+  byte bytes[4];
+} float_byte_array;
+
+union {
+  long value;
+  byte bytes[4];
+} long_byte_array;
+
+union {
+  short value;
+  byte bytes[2];
+} short_byte_array;
+
 
 volatile ticks_t _right_motor_ticks = 0;
 volatile ticks_t _left_motor_ticks = 0;
@@ -128,6 +143,10 @@ class Motor {
     /* [ticks / s] */
     long GetActualVelocity() {
       return actual_velocity;
+    }
+
+    void SetPidTunings(const double p, const double i, const double d) {
+      pid->SetTunings(p, i, d);
     }
 
     /* Args:
@@ -282,12 +301,13 @@ void process_command() {
   const static byte ACK = 0xAA;
   const static byte NCK = 0xFF;
   const static byte SET_VELOCITY_COMMAND = 0xC0;
+  const static byte SET_PID_TUNINGS_COMMAND = 0xC1;
 
   static short  left_motor_velocity = 0;
   static short right_motor_velocity = 0;
   static unsigned long last_command_time = 0;
 
-  if ((millis() - last_command_time) > 5000) {
+  if ((millis() - last_command_time) > 2000) {
     left_motor_velocity = right_motor_velocity = 0;
   }
 
@@ -322,8 +342,8 @@ void process_command() {
     Serial.read();  // Discard the command
 
     // Read the target motor velocities
-    left_motor_velocity  = (Serial.read() << 8) | Serial.read();
-    right_motor_velocity = (Serial.read() << 8) | Serial.read();
+    left_motor_velocity  = Serial_ReadShortBytes();
+    right_motor_velocity = Serial_ReadShortBytes();
 
     // Get actual motor and bumper states
     const long   actual_left_motor_position =  left_motor.GetActualPosition();
@@ -334,19 +354,43 @@ void process_command() {
 
     // Send the ACK and states
     Serial.write(ACK);
-    Serial_WriteBytes(actual_left_motor_position, 4);
-    Serial_WriteBytes(actual_left_motor_velocity, 2);
-    Serial_WriteBytes(actual_right_motor_position, 4);
-    Serial_WriteBytes(actual_right_motor_velocity, 2);
+    Serial_WriteLongBytes( actual_left_motor_position);
+    Serial_WriteShortBytes(actual_left_motor_velocity);
+    Serial_WriteLongBytes( actual_right_motor_position);
+    Serial_WriteShortBytes(actual_right_motor_velocity);
     Serial.write(bumpers);
 
     last_command_time = millis();
   }
 
-  else if (command == 0x22) {
-    if (!Serial.available() >= 4) {
+  /* "Set PID Tunings" command structure:
+   * - Recv: 13 bytes total
+   *   - command: byte = 0xC1
+   *   - p: float (MSB first)
+   *   - i: float (MSB first)
+   *   - d: float (MSB first)
+   * - Send: 14 bytes total
+   *   - ACK: byte = 0xAA
+   */
+  else if (command == SET_PID_TUNINGS_COMMAND) {
+    if (Serial.available() < 13 || Serial.availableForWrite() < 1) {
       return;
     }
+
+    // Discard the command
+    Serial.read();
+
+    // Get the new PID tunings
+    const float new_p = Serial_ReadFloatBytes();
+    const float new_i = Serial_ReadFloatBytes();
+    const float new_d = Serial_ReadFloatBytes();
+
+    // Set the new PID tunings
+    left_motor.SetPidTunings(new_p, new_i, new_d);
+    right_motor.SetPidTunings(new_p, new_i, new_d);
+
+    // All is well
+    Serial.write(ACK);
   }
 
   else {
@@ -357,10 +401,49 @@ void process_command() {
 }
 
 
-void Serial_WriteBytes(const long value, const int byte_cnt) {
-  for (int byte_index = byte_cnt - 1; byte_index >= 0; byte_index--) {
-    Serial.write((value >> (byte_index * 8)) & 0xFF);
-  }
+float Serial_ReadFloatBytes() {
+  float_byte_array.bytes[0] = Serial.read();
+  float_byte_array.bytes[1] = Serial.read();
+  float_byte_array.bytes[2] = Serial.read();
+  float_byte_array.bytes[3] = Serial.read();
+
+  return float_byte_array.value;
+}
+
+
+short Serial_ReadShortBytes() {
+  short_byte_array.bytes[0] = Serial.read();
+  short_byte_array.bytes[1] = Serial.read();
+
+  return short_byte_array.value;
+}
+
+
+void Serial_WriteFloatBytes(const float value) {
+  float_byte_array.value = value;
+
+  Serial.write(float_byte_array.bytes[0]);
+  Serial.write(float_byte_array.bytes[1]);
+  Serial.write(float_byte_array.bytes[2]);
+  Serial.write(float_byte_array.bytes[3]);
+}
+
+
+void Serial_WriteLongBytes(const long value) {
+  long_byte_array.value = value;
+
+  Serial.write(long_byte_array.bytes[0]);
+  Serial.write(long_byte_array.bytes[1]);
+  Serial.write(long_byte_array.bytes[2]);
+  Serial.write(long_byte_array.bytes[3]);
+}
+
+
+void Serial_WriteShortBytes(const short value) {
+  short_byte_array.value = value;
+
+  Serial.write(short_byte_array.bytes[0]);
+  Serial.write(short_byte_array.bytes[1]);
 }
 
 

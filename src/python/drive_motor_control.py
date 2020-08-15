@@ -46,8 +46,10 @@ class DriveMotorController(Thread):
 
     _ACK = b'\xAA'
     _SET_VELOCITY_COMMAND = b'\xC0'
-    _SET_VELOCITY_RECV_STRUCT = struct.Struct('>chh')
-    _SET_VELOCITY_SEND_STRUCT = struct.Struct('>lhlhc')
+    _SET_VELOCITY_RECV_STRUCT = struct.Struct('<chh')
+    _SET_VELOCITY_SEND_STRUCT = struct.Struct('<lhlhc')
+    _SET_PID_TUNINGS_COMMAND = b'\xC1'
+    _SET_PID_TUNINGS_RECV_STRUCT = struct.Struct('<cfff')
 
     def __init__(
             self,
@@ -96,6 +98,25 @@ class DriveMotorController(Thread):
 
         while not self._stop_event.wait(self._set_velocity_resend_period):
             self._send_set_velocity_command()
+
+    def set_pid_tunings(self, p: float, i: float, d: float) -> None:
+        """
+        Good default tunings: ``(0.05, 0.5, 0)``
+        """
+
+        # Make sure tunings are non-negative
+        if p < 0 or i < 0 or d < 0:
+            raise ValueError(f'All tunings must be non-negative. Given tunings: p={p}, i={i}, d={d}')
+
+        with self._lock:
+            # Send the bytes for the "set PID tunings" command
+            self._conn.write(self._SET_PID_TUNINGS_RECV_STRUCT.pack(self._SET_PID_TUNINGS_COMMAND, p, i, d))
+            self._conn.flush()
+
+            # Receive the response, hopefully it's an ACK
+            response = self._conn.read()
+            if response != self._ACK:
+                raise DriveMotorException('Did not receive ACK from the controller!')
 
     def set_velocity_differential(
             self,
@@ -178,7 +199,7 @@ class DriveMotorController(Thread):
                 callback(self, state)
             except RuntimeError:
                 raise
-            except:
+            except Exception:
                 print(f'Exception occurred while running callback {callback!r}:')
                 traceback.print_last()
 
@@ -337,7 +358,7 @@ def test_set_velocity_unicycle_gamesir(drive_motors: DriveMotorController):
         prev_state = state
 
 
-def test_set_velocity_steer_cli(drive_motors: DriveMotorController):
+def test_set_velocity_unicycle_cli(drive_motors: DriveMotorController):
     while True:
         try:
             result = input('[v,w]: ')
@@ -352,13 +373,22 @@ def test_set_velocity_steer_cli(drive_motors: DriveMotorController):
         print(drive_motors.set_velocity_unicycle(v, w))
 
 
+def _find_controller() -> DriveMotorController:
+    from glob import iglob
+    serial_port = next(iglob('/dev/ttyACM*'))
+    return DriveMotorController(serial_port)
+
+
 def main():
     print('Connecting to drive motor controller...')
-    with DriveMotorController('/dev/ttyACM5') as drive_motors:
+    with _find_controller() as drive_motors:
         print('Connected.\n')
 
-        # test_set_velocity_steer_cli(drive_motors)
-        test_set_velocity_unicycle_gamesir(drive_motors)
+        try:
+            test_set_velocity_unicycle_cli(drive_motors)
+            # test_set_velocity_unicycle_gamesir(drive_motors)
+        except KeyboardInterrupt:
+            print()
 
 
 if __name__ == '__main__':
