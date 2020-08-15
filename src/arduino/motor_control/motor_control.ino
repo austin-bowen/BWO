@@ -113,8 +113,8 @@ class Motor {
     // [ms]
     int sample_time = 1000 / 50;
 
-    // [ticks / s]
-    unsigned long acceleration = 8000;
+    // [ticks / s^2]
+    unsigned short acceleration = 8000;
 
     bool debug = false;
     bool (*forward_check_func)(void) = nullptr;
@@ -292,8 +292,6 @@ void setup_motors() {
 
 void loop() {
   process_command();
-  //test_control();
-  //avoid_objects();
 }
 
 
@@ -444,114 +442,6 @@ void Serial_WriteShortBytes(const short value) {
 
   Serial.write(short_byte_array.bytes[0]);
   Serial.write(short_byte_array.bytes[1]);
-}
-
-
-void avoid_objects() {
-  const static int FORWARD_STATE = 0;
-  const static int REVERSE_STATE = 1;
-  const static int TURN_CW_STATE = 2;
-  const static int TURN_CCW_STATE = 3;
-
-  const static int SPEED = 1000;
-
-  static int state = FORWARD_STATE;
-  static unsigned long state_change_time_us = 0;
-
-  int left_speed = 0;
-  int right_speed = 0;
-
-  // Driving forward?
-  if (state == FORWARD_STATE) {
-    // Full speed ahead, boys
-    left_speed = right_speed = SPEED;
-
-    // Collision!?
-    if (left_bumper || middle_bumper || right_bumper) {
-      state = REVERSE_STATE;
-      state_change_time_us = micros() + random(1000000, 2000000);
-    }
-  }
-
-  // Reversing?
-  else if (state == REVERSE_STATE) {
-    left_speed = right_speed = -SPEED;
-
-    // Done waiting?
-    if (micros() >= state_change_time_us) {
-      state = random(2) ? TURN_CW_STATE : TURN_CCW_STATE;
-      state_change_time_us = micros() + random(500000, 1500000);
-    }
-  }
-
-  // Turning clockwise?
-  else if (state == TURN_CW_STATE) {
-    left_speed = SPEED;
-    right_speed = -SPEED;
-
-    // Done waiting?
-    if (micros() >= state_change_time_us) {
-      state = FORWARD_STATE;
-    }
-  }
-
-  // Turning counter-clockwise?
-  else if (state == TURN_CCW_STATE) {
-    left_speed = -SPEED;
-    right_speed = SPEED;
-
-    // Done waiting?
-    if (micros() >= state_change_time_us) {
-      state = FORWARD_STATE;
-    }
-  }
-
-  // This should never happen!
-  else {
-    left_speed = right_speed = 0;
-  }
-
-  // Don't move forward if a bumper is pressed
-  if ((left_bumper || middle_bumper) && left_speed > 0) {
-    left_speed = 0;
-  }
-  if ((right_bumper || middle_bumper) && right_speed > 0) {
-    right_speed = 0;
-  }
-
-  left_motor.SetTargetVelocity(left_speed);
-  right_motor.SetTargetVelocity(right_speed);
-}
-
-
-void test_control() {
-  static ticks_t user_target_speed = 0;
-
-  if (Serial.available()) {
-    user_target_speed = Serial.parseInt();
-    while (Serial.available()) {
-      Serial.read();
-    }
-  }
-
-  /*
-  const double gain = 3;
-  const double limit = 2;
-  const double speed_limit = 100;
-
-  double e = gain * (user_target_speed - left_motor.GetActualPosition());
-  if (abs(e) < limit) e = 0;
-  left_motor.SetTargetVelocity(constrain(e, -speed_limit, speed_limit));
-
-  e = gain * (user_target_speed - right_motor.GetActualPosition());
-  if (abs(e) < limit) e = 0;
-  right_motor.SetTargetVelocity(constrain(e, -speed_limit, speed_limit));
-  */
-
-  left_motor.debug = true;
-  left_motor.SetTargetVelocity(user_target_speed);
-  left_motor.debug = false;
-  //right_motor.SetTargetVelocity(user_target_speed);
 }
 
 
