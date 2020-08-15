@@ -50,6 +50,8 @@ class DriveMotorController(Thread):
     _SET_VELOCITY_SEND_STRUCT = struct.Struct('<lhlhc')
     _SET_PID_TUNINGS_COMMAND = b'\xC1'
     _SET_PID_TUNINGS_RECV_STRUCT = struct.Struct('<cfff')
+    _SET_ACCELERATION_COMMAND = b'\xC2'
+    _SET_ACCELERATION_RECV_STRUCT = struct.Struct('<cH')
 
     def __init__(
             self,
@@ -99,7 +101,26 @@ class DriveMotorController(Thread):
         while not self._stop_event.wait(self._set_velocity_resend_period):
             self._send_set_velocity_command()
 
-    def set_pid_tunings(self, p: float, i: float, d: float) -> None:
+    def set_acceleration(self, acceleration: int = 8000) -> None:
+        """
+        Sets the controller acceleration.
+
+        :param acceleration: How quickly the controller should accelerate to a new velocity [ticks / s^2].
+            If set to 0, acceleration is instant.
+        """
+
+        if acceleration < 0:
+            raise ValueError(f'Acceleration must be >= 0. Given acceleration: {acceleration}')
+
+        with self._lock:
+            # Send the bytes for the "set acceleration" command
+            self._conn.write(self._SET_ACCELERATION_RECV_STRUCT.pack(self._SET_ACCELERATION_COMMAND, acceleration))
+            self._conn.flush()
+
+            # Receive the response, hopefully it's an ACK
+            self._recv_ack()
+
+    def set_pid_tunings(self, p: float = 0.05, i: float = 0.5, d: float = 0.0) -> None:
         """
         Good default tunings: ``(0.05, 0.5, 0)``
         """
@@ -114,9 +135,7 @@ class DriveMotorController(Thread):
             self._conn.flush()
 
             # Receive the response, hopefully it's an ACK
-            response = self._conn.read()
-            if response != self._ACK:
-                raise DriveMotorException('Did not receive ACK from the controller!')
+            self._recv_ack()
 
     def set_velocity_differential(
             self,
@@ -155,6 +174,12 @@ class DriveMotorController(Thread):
     def stop_motors(self) -> DriveMotorState:
         return self.set_velocity_differential(0, 0)
 
+    def _recv_ack(self) -> None:
+        with self._lock:
+            response = self._conn.read()
+            if response != self._ACK:
+                raise DriveMotorException('Did not receive ACK from the controller!')
+
     def _send_set_velocity_command(self) -> DriveMotorState:
         with self._lock:
             # Send the bytes for the "set velocity" command
@@ -167,9 +192,7 @@ class DriveMotorController(Thread):
 
             # Grab the current time and receive the response byte (either ACK or NCK)
             timestamp = time.monotonic()
-            response = self._conn.read()
-            if response != self._ACK:
-                raise DriveMotorException('Did not receive ACK from the controller!')
+            self._recv_ack()
 
             # Receive and unpack the response bytes
             left_motor_position, left_motor_velocity, right_motor_position, right_motor_velocity, bumpers = \

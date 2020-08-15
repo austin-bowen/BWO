@@ -48,6 +48,11 @@ union {
   byte bytes[2];
 } short_byte_array;
 
+union {
+  unsigned short value;
+  byte bytes[2];
+} unsigned_short_byte_array;
+
 
 volatile ticks_t _right_motor_ticks = 0;
 volatile ticks_t _left_motor_ticks = 0;
@@ -300,6 +305,7 @@ void process_command() {
   const static byte NCK = 0xFF;
   const static byte SET_VELOCITY_COMMAND = 0xC0;
   const static byte SET_PID_TUNINGS_COMMAND = 0xC1;
+  const static byte SET_ACCELERATION_COMMAND = 0xC2;
 
   static short  left_motor_velocity = 0;
   static short right_motor_velocity = 0;
@@ -321,14 +327,14 @@ void process_command() {
   /* "Set Velocity" command structure:
    * - Recv: 5 bytes total
    *   - command: byte = 0xC0
-   *   - left_motor_velocity : signed short (MSB first, ticks/s)
-   *   - right_motor_velocity: signed short (MSB first, ticks/s)
+   *   - left_motor_velocity : signed short (ticks / s)
+   *   - right_motor_velocity: signed short (ticks / s)
    * - Send: 14 bytes total
    *   - ACK: byte = 0xAA
-   *   - actual_left_motor_position : signed long  (MSB first, ticks)
-   *   - actual_left_motor_velocity : signed short (MSB first, ticks/s)
-   *   - actual_right_motor_position: signed long  (MSB first, ticks)
-   *   - actual_right_motor_velocity: signed short (MSB first, ticks/s)
+   *   - actual_left_motor_position : signed long  (ticks)
+   *   - actual_left_motor_velocity : signed short (ticks / s)
+   *   - actual_right_motor_position: signed long  (ticks)
+   *   - actual_right_motor_velocity: signed short (ticks / s)
    *   - bumpers: byte (bit 2: left bumper; bit 1: middle bumper; bit 0: right bumper)
    */
   if (command == SET_VELOCITY_COMMAND) {
@@ -364,10 +370,10 @@ void process_command() {
   /* "Set PID Tunings" command structure:
    * - Recv: 13 bytes total
    *   - command: byte = 0xC1
-   *   - p: float (MSB first)
-   *   - i: float (MSB first)
-   *   - d: float (MSB first)
-   * - Send: 14 bytes total
+   *   - p: float
+   *   - i: float
+   *   - d: float
+   * - Send: 1 byte total
    *   - ACK: byte = 0xAA
    */
   else if (command == SET_PID_TUNINGS_COMMAND) {
@@ -386,6 +392,28 @@ void process_command() {
     // Set the new PID tunings
     left_motor.SetPidTunings(new_p, new_i, new_d);
     right_motor.SetPidTunings(new_p, new_i, new_d);
+
+    // All is well
+    Serial.write(ACK);
+  }
+
+  /* "Set Acceleration" command structure:
+   * - Recv: 3 bytes total
+   *   - command: byte = 0xC2
+   *   - acceleration: unsigned short (ticks / s^2)
+   * - Send: 1 byte total
+   *   - ACK: byte = 0xAA
+   */
+  else if (command == SET_ACCELERATION_COMMAND) {
+    if (Serial.available() < 3 || Serial.availableForWrite() < 1) {
+      return;
+    }
+
+    // Discard the command
+    Serial.read();
+
+    // Read and set the new acceleration
+    left_motor.acceleration = right_motor.acceleration = Serial_ReadUnsignedShortBytes();
 
     // All is well
     Serial.write(ACK);
@@ -414,6 +442,14 @@ short Serial_ReadShortBytes() {
   short_byte_array.bytes[1] = Serial.read();
 
   return short_byte_array.value;
+}
+
+
+unsigned short Serial_ReadUnsignedShortBytes() {
+  unsigned_short_byte_array.bytes[0] = Serial.read();
+  unsigned_short_byte_array.bytes[1] = Serial.read();
+
+  return unsigned_short_byte_array.value;
 }
 
 
