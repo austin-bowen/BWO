@@ -2,4 +2,10 @@
 
 echo Starting BWO!
 
-pipenv run python3 run.py
+cd "$(dirname "$0")"
+
+. bin/activate
+
+cd src/python
+
+python main.py
