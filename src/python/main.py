@@ -1,4 +1,5 @@
 import itertools
+import os
 import time
 from math import atan2, sqrt, pi
 
@@ -153,11 +154,15 @@ def test_waypoint_following():
 
 
 def main() -> int:
+    print(f'PID: {os.getpid()}\n')
+
     try:
         test_remote_control()
         # test_waypoint_following()
     except KeyboardInterrupt:
         print()
+    finally:
+        print(f'Exiting.')
 
     return 0
 
