@@ -1,19 +1,21 @@
-from typing import Optional
+"""Utilities."""
 
-from serial.tools.list_ports import comports
-from serial.tools.list_ports_common import ListPortInfo
+from serial.tools.list_ports import comports, grep as grep_serial_ports
+
+__all__ = [
+    'grep_serial_ports',
+    'normalize_angle_degrees',
+    'print_serial_ports'
+]
 
 
-def get_serial_port_with_hwid(hwid: str) -> Optional[ListPortInfo]:
+def normalize_angle_degrees(angle):
     """
-    :return: The first serial port (ListPortInfo instance) with a matching hwid, or None if not found.
+    :return: The angle normalized to (-180, 180] degrees.
     """
 
-    for serial_port in comports():
-        if serial_port.hwid == hwid:
-            return serial_port
-
-    return None
+    angle = angle % 360
+    return angle if angle <= 180 else (angle - 360)
 
 
 def print_serial_ports() -> None:
@@ -26,12 +28,3 @@ def print_serial_ports() -> None:
 
     for p in sorted(ports):
         print(f'name={p.name!r}, device={p.device!r}, description={p.description!r}, hwid={p.hwid!r}')
-
-
-def normalize_angle_degrees(angle):
-    """
-    :return: The angle normalized to (-180, 180] degrees.
-    """
-
-    angle = angle % 360
-    return angle if angle <= 180 else (angle - 360)

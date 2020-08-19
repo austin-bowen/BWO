@@ -6,7 +6,7 @@ import gamesir
 from drive_motor_control import DriveMotorController, ticks_to_distance, differential_to_unicycle
 from maestro import MicroMaestro
 from orientation import Orientation
-from utils import normalize_angle_degrees, get_serial_port_with_hwid
+from utils import grep_serial_ports, normalize_angle_degrees
 
 
 class Point:
@@ -28,10 +28,10 @@ class Point:
 
 
 def test_remote_control():
-    drive_motors_serial_port = get_serial_port_with_hwid(
-        'USB VID:PID=2886:802F SER=46EB557A50533050352E3120FF121E27 LOCATION=2-3.1:1.0')
-    servo_control_serial_port = get_serial_port_with_hwid(
-        'USB VID:PID=1FFB:0089 SER=00233827 LOCATION=2-3.3:1.0')
+    drive_motors_serial_port = next(grep_serial_ports(
+        r'USB VID:PID=2886:802F SER=46EB557A50533050352E3120FF121E27 LOCATION=.+'))
+    servo_control_serial_port = next(grep_serial_ports(
+        r'USB VID:PID=1FFB:0089 SER=00233827 LOCATION=.+\.0'))
 
     normal_speed = 40
     turbo_speed = 80
@@ -66,7 +66,7 @@ def test_remote_control():
 
             elif event_code == controller.EventCode.RIGHT_JOYSTICK_Y:
                 value = (128 - event.value) / 128
-                target = 1500 - 500 * value
+                target = 1450 - 500 * value
                 servo_control.set_target(0, target)
                 continue
 
