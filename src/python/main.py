@@ -70,8 +70,8 @@ class GamesirNode(Node):
 
         if event_code == controller.EventCode.LEFT_JOYSTICK_X:
             topic = 'left_joystick_x'
-            # Scale from [255, 0] to [-1., 1.]
-            value = (128 - event.value) / 128
+            # Scale from [0, 255] to [-1., 1.]
+            value = (event.value - 128) / 128
 
         elif event_code == controller.EventCode.LEFT_JOYSTICK_Y:
             topic = 'left_joystick_y'
@@ -85,8 +85,8 @@ class GamesirNode(Node):
 
         elif event_code == controller.EventCode.RIGHT_JOYSTICK_Y:
             topic = 'right_joystick_y'
-            # Scale from [255, 0] to [-1., 1.]
-            value = (128 - event.value) / 128
+            # Scale from [0, 255] to [-1., 1.]
+            value = (event.value - 128) / 128
 
         elif event_code == controller.EventCode.LEFT_TRIGGER_PRESSURE:
             topic = 'left_trigger_pressure'
