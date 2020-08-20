@@ -18,7 +18,7 @@ class DriveMotorsNode(Node):
 
         self._target_linear_velocity = 0
         self._target_angular_velocity = 0
-        self.subscribe('remote_control.left_joystick_x', self._handle_left_joystick_x)
+        self.subscribe('remote_control.right_joystick_x', self._handle_left_joystick_x)
         self.subscribe('remote_control.left_joystick_y', self._handle_left_joystick_y)
 
     def loop(self) -> None:
@@ -57,16 +57,16 @@ class GamesirNode(Node):
         super().__init__('Gamesir Controller', 5)
 
     def loop(self) -> None:
-        print('Searching for Gamesir controller...')
+        self.log('Searching for Gamesir controller...')
         controllers = gamesir.get_controllers()
         if not controllers:
             print('Failed to find Gamesir controller.')
             return
 
-        print('Connecting...')
+        self.log('Connecting...')
         try:
             with controllers[0] as controller:
-                print('Connected.')
+                self.log('Connected.')
 
                 for event in controller.read_loop():
                     if self._stop_flag.is_set():
@@ -142,7 +142,10 @@ class ServosNode(Node):
             with MicroMaestro(tty=serial_port.device) as servo_control:
                 self.log('Connected.')
 
-                while not self._stop_flag.is_set(timeout=0.1):
+                servo_control.set_acceleration(0, 0);
+                servo_control.set_acceleration(1, 0);
+
+                while not self._stop_flag.wait(timeout=0.1):
                     if self._targets_changed.is_set():
                         self._targets_changed.clear()
                         servo_control.set_targets(self._targets)
@@ -155,11 +158,11 @@ class ServosNode(Node):
             self.log('Disconnected.')
 
     def _handle_right_joystick_x(self, message: Message) -> None:
-        self._targets[1] = 1500 + 500 * message.data
+        self._targets[1] = 1500 - 500 * message.data
         self._targets_changed.set()
 
     def _handle_right_joystick_y(self, message: Message) -> None:
-        self._targets[0] = 1500 + 500 * message.data
+        self._targets[0] = 1450 + 500 * message.data
         self._targets_changed.set()
 
 
@@ -184,10 +187,11 @@ class Point:
 def test_remote_control_nodes():
     node_runner = NodeRunner([
         GamesirNode(),
-        DriveMotorsNode()
+        DriveMotorsNode(),
+        ServosNode()
     ])
 
-    node_runner.print_messages_matching(r'.+')
+    #node_runner.print_messages_matching(r'drive_motors\..+')
 
     node_runner.run()
 
