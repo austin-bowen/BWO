@@ -1,6 +1,7 @@
 """
 TODO: This.
 """
+import re
 import traceback
 from abc import ABC
 from multiprocessing import Event, Process, Queue
@@ -110,8 +111,13 @@ class NodeRunner:
     def __init__(self, nodes: List[Node] = None):
         self.nodes = nodes if nodes else []
 
+        self._print_message_patterns = []
+
     def add_node(self, node: Node) -> None:
         self.nodes.append(node)
+
+    def print_messages_matching(self, topic_pattern: str):
+        self._print_message_patterns.append(re.compile(topic_pattern))
 
     def run(self) -> None:
         try:
@@ -131,7 +137,8 @@ class NodeRunner:
                     else:
                         break
 
-                # print(message)
+                if any(pattern.match(message.topic) for pattern in self._print_message_patterns):
+                    print(message)
 
                 if message.topic == 'easybot.stop':
                     break
