@@ -2,6 +2,7 @@ import itertools
 import os
 import time
 from math import atan2, sqrt, pi
+from multiprocessing import Event
 
 import gamesir
 from drive_motor_control import DriveMotorController, ticks_to_distance, differential_to_unicycle
@@ -35,7 +36,12 @@ class DriveMotorsNode(Node):
                 self.log('Connected.')
 
                 while not self._stop_flag.wait(timeout=0.1):
-                    drive_motors.set_velocity_unicycle(self._target_linear_velocity, self._target_angular_velocity)
+                    state = drive_motors.set_velocity_unicycle(
+                        self._target_linear_velocity,
+                        self._target_angular_velocity
+                    )
+
+                    self.publish('drive_motors.state', state)
         finally:
             self.log('Disconnected.')
 
@@ -51,16 +57,24 @@ class GamesirNode(Node):
         super().__init__('Gamesir Controller', 5)
 
     def loop(self) -> None:
+        print('Searching for Gamesir controller...')
         controllers = gamesir.get_controllers()
         if not controllers:
+            print('Failed to find Gamesir controller.')
             return
 
-        with controllers[0] as controller:
-            for event in controller.read_loop():
-                if self._stop_flag.is_set():
-                    return
+        print('Connecting...')
+        try:
+            with controllers[0] as controller:
+                print('Connected.')
 
-                self.handle_controller_event(controller, event)
+                for event in controller.read_loop():
+                    if self._stop_flag.is_set():
+                        return
+
+                    self.handle_controller_event(controller, event)
+        finally:
+            print('Disconnected.')
 
     def handle_controller_event(self, controller, event) -> None:
         if event.type not in controller.EVENT_TYPES:
@@ -104,6 +118,51 @@ class GamesirNode(Node):
         self.publish(f'remote_control.{topic}', value)
 
 
+class ServosNode(Node):
+    def __init__(self):
+        super().__init__('Servos', 5)
+
+        self._targets = {0: 1500, 1: 1500}
+        self._targets_changed = Event()
+        self._targets_changed.set()
+
+        self.subscribe('remote_control.right_joystick_x', self._handle_right_joystick_x)
+        self.subscribe('remote_control.right_joystick_y', self._handle_right_joystick_y)
+
+    def loop(self) -> None:
+        self.log('Searching for Maestro...')
+        try:
+            serial_port = next(grep_serial_ports(r'USB VID:PID=1FFB:0089 SER=00233827 LOCATION=.+\.0'))
+        except StopIteration:
+            self.log_warning('Failed to find Maestro.')
+            return
+
+        self.log('Connecting...')
+        try:
+            with MicroMaestro(tty=serial_port.device) as servo_control:
+                self.log('Connected.')
+
+                while not self._stop_flag.is_set(timeout=0.1):
+                    if self._targets_changed.is_set():
+                        self._targets_changed.clear()
+                        servo_control.set_targets(self._targets)
+
+                    for channel in sorted(self._targets.keys()):
+                        topic = f'servos.channel.{channel}.position'
+                        data = servo_control.get_position(channel)
+                        self.publish(topic, data)
+        finally:
+            self.log('Disconnected.')
+
+    def _handle_right_joystick_x(self, message: Message) -> None:
+        self._targets[1] = 1500 + 500 * message.data
+        self._targets_changed.set()
+
+    def _handle_right_joystick_y(self, message: Message) -> None:
+        self._targets[0] = 1500 + 500 * message.data
+        self._targets_changed.set()
+
+
 class Point:
     def __init__(self, x, y) -> None:
         self.x = x
@@ -127,6 +186,8 @@ def test_remote_control_nodes():
         GamesirNode(),
         DriveMotorsNode()
     ])
+
+    node_runner.print_messages_matching(r'.+')
 
     node_runner.run()
 
