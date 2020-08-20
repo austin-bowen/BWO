@@ -1,7 +1,7 @@
 """
 TODO: This.
 """
-
+import traceback
 from abc import ABC
 from multiprocessing import Event, Process, Queue
 from queue import Empty
@@ -47,11 +47,14 @@ class Node(ABC):
         if self.loop_period is not None and self.loop_period > 0:
             while True:
                 t0 = monotonic()
+
                 try:
                     self.loop()
-                except Exception as e:
-                    print_last()
-                    self.log_error(f'Exception occurred while running loop(): {e}')
+                except Exception:
+                    self.log_error(f'Exception occurred while running loop():')
+                    for line in traceback.format_exc().splitlines():
+                        self.log_error(line)
+
                 elapsed = monotonic() - t0
 
                 timeout = self.loop_period - elapsed
