@@ -5,9 +5,103 @@ from math import atan2, sqrt, pi
 
 import gamesir
 from drive_motor_control import DriveMotorController, ticks_to_distance, differential_to_unicycle
+from easybot.node import Message, Node, NodeRunner
 from maestro import MicroMaestro
 from orientation import Orientation
 from utils import grep_serial_ports, normalize_angle_degrees
+
+
+class DriveMotorsNode(Node):
+    def __init__(self):
+        super().__init__('Drive Motors', 5)
+
+        self._target_linear_velocity = 0
+        self._target_angular_velocity = 0
+        self.subscribe('remote_control.left_joystick_x', self._handle_left_joystick_x)
+        self.subscribe('remote_control.left_joystick_y', self._handle_left_joystick_y)
+
+    def loop(self) -> None:
+        self.log('Search for motor controller...')
+        try:
+            serial_port = next(grep_serial_ports(
+                r'USB VID:PID=2886:802F SER=46EB557A50533050352E3120FF121E27 LOCATION=.+'))
+        except StopIteration:
+            self.log_warning('Failed to find motor controller.')
+            return
+
+        self.log('Connecting...')
+        try:
+            with DriveMotorController(controller_serial_port=serial_port.device) as drive_motors:
+                self.log('Connected.')
+
+                while not self._stop_flag.wait(timeout=0.1):
+                    drive_motors.set_velocity_unicycle(self._target_linear_velocity, self._target_angular_velocity)
+        finally:
+            self.log('Disconnected.')
+
+    def _handle_left_joystick_x(self, message: Message):
+        self._target_angular_velocity = -90 * message.data
+
+    def _handle_left_joystick_y(self, message: Message):
+        self._target_linear_velocity = 40 * message.data
+
+
+class GamesirNode(Node):
+    def __init__(self):
+        super().__init__('Gamesir Controller', 5)
+
+    def loop(self) -> None:
+        controllers = gamesir.get_controllers()
+        if not controllers:
+            return
+
+        with controllers[0] as controller:
+            for event in controller.read_loop():
+                if self._stop_flag.is_set():
+                    return
+
+                self.handle_controller_event(controller, event)
+
+    def handle_controller_event(self, controller, event) -> None:
+        if event.type not in controller.EVENT_TYPES:
+            return
+
+        event_code = controller.EventCode(event.code)
+
+        if event_code == controller.EventCode.LEFT_JOYSTICK_X:
+            topic = 'left_joystick_x'
+            # Scale from [255, 0] to [-1., 1.]
+            value = (128 - event.value) / 128
+
+        elif event_code == controller.EventCode.LEFT_JOYSTICK_Y:
+            topic = 'left_joystick_y'
+            # Scale from [255, 0] to [-1., 1.]
+            value = (128 - event.value) / 128
+
+        elif event_code == controller.EventCode.RIGHT_JOYSTICK_X:
+            topic = 'right_joystick_x'
+            # Scale from [255, 0] to [-1., 1.]
+            value = (128 - event.value) / 128
+
+        elif event_code == controller.EventCode.RIGHT_JOYSTICK_Y:
+            topic = 'right_joystick_y'
+            # Scale from [255, 0] to [-1., 1.]
+            value = (128 - event.value) / 128
+
+        elif event_code == controller.EventCode.LEFT_TRIGGER_PRESSURE:
+            topic = 'left_trigger_pressure'
+            # Scale from [0, 255] to [0, 1]
+            value = event.value / 255
+
+        elif event_code == controller.EventCode.RIGHT_TRIGGER_PRESSURE:
+            topic = 'right_trigger_pressure'
+            # Scale from [0, 255] to [0, 1]
+            value = event.value / 255
+
+        else:
+            return
+
+        self.publish(f'remote_control.{topic}', value)
 
 
 class Point:
@@ -26,6 +120,15 @@ class Point:
     def distance(self, other: 'Point') -> float:
         """:return: The distance [no units] of this point from the other point."""
         return sqrt((other.x - self.x) ** 2 + (other.y - self.y) ** 2)
+
+
+def test_remote_control_nodes():
+    node_runner = NodeRunner([
+        GamesirNode(),
+        DriveMotorsNode()
+    ])
+
+    node_runner.run()
 
 
 def test_remote_control():
@@ -157,7 +260,8 @@ def main() -> int:
     print(f'PID: {os.getpid()}\n')
 
     try:
-        test_remote_control()
+        # test_remote_control()
+        test_remote_control_nodes()
         # test_waypoint_following()
     except KeyboardInterrupt:
         print()
