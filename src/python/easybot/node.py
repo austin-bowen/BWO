@@ -34,7 +34,7 @@ class Node(ABC):
             raise ValueError(f'worker_type must be one of "process" or "thread"; got {worker_type!r}.')
 
         self._stop_flag = Event()
-        self._worker = worker_class(target=self.run, name=name)
+        self._worker = worker_class(target=self.run, name=name, daemon=True)
 
     def __str__(self) -> str:
         return f'Node "{self.name}"'
