@@ -1,5 +1,6 @@
 import itertools
 import os
+import signal
 import time
 from math import atan2, sqrt, pi
 from multiprocessing import Event
@@ -185,6 +186,14 @@ class Point:
 
 
 def test_remote_control_nodes():
+    def handle_terminate_signal(*unused):
+        print('Sending stop signal...')
+        Node.publish('easybot.stop')
+
+    signal.signal(signal.SIGINT, handle_terminate_signal)
+    signal.signal(signal.SIGQUIT, handle_terminate_signal)
+    signal.signal(signal.SIGTERM, handle_terminate_signal)
+
     node_runner = NodeRunner([
         GamesirNode(),
         DriveMotorsNode(),

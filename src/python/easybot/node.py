@@ -1,6 +1,7 @@
 """
 TODO: This.
 """
+
 import re
 import traceback
 from abc import ABC
@@ -94,7 +95,7 @@ class Node(ABC):
         self.log(message, *args, message_type='WARN', **kwargs)
 
     @staticmethod
-    def publish(topic: str, data: Any) -> None:
+    def publish(topic: str, data: Any = None) -> None:
         _MESSAGE_QUEUE.put(Message(topic, data, monotonic()))
 
     @staticmethod

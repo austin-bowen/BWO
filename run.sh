@@ -4,8 +4,8 @@ echo Starting BWO!
 
 cd "$(dirname "$0")"
 
-. bin/activate
+source bin/activate
 
 cd src/python
 
-python main.py
+exec python -u main.py

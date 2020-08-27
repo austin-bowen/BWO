@@ -1,0 +1,12 @@
+[Unit]
+Description=BWO
+
+[Service]
+ExecStart=/home/austin/Projects/bwo/run.sh
+Restart=no
+Type=exec
+User=austin
+WorkingDirectory=/home/austin/Projects/bwo
+
+[Install]
+WantedBy=multi-user.target
