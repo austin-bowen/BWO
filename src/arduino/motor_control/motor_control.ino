@@ -121,6 +121,10 @@ class Motor {
     // [ticks / s^2]
     unsigned short acceleration = 8000;
 
+    // If this is true, then the robot will resist movement when stopped.
+    // if it is false, then the robot can be pushed around when stopped.
+    bool brake = false;
+
     bool debug = false;
     bool (*forward_check_func)(void) = nullptr;
 
@@ -134,7 +138,7 @@ class Motor {
 
       this->pid = new PID(&actual_velocity, &pid_output, &target_velocity, 0.05, 0.5, 0, DIRECT);
       pid->SetSampleTime(sample_time);
-      pid->SetOutputLimits(0, 0);
+      pid->SetOutputLimits(-MAX_MOTOR_PWM, MAX_MOTOR_PWM);
       pid->SetMode(MANUAL);
 
       Stop();
@@ -181,7 +185,7 @@ class Motor {
       }
       UpdateActualVelocity();
 
-      if (CloseToEqual(target_velocity, 0)) {
+      if (CloseToEqual(target_velocity, 0) && !brake) {
         if (pid->GetMode() != MANUAL) {
           pid->SetMode(MANUAL);
         }
@@ -189,14 +193,6 @@ class Motor {
       } else {
         if (pid->GetMode() != AUTOMATIC) {
           pid->SetMode(AUTOMATIC);
-        }
-
-        // We don't want the PID controller to tell the motor to go
-        // the opposite direction of where it should be going
-        if (target_velocity >= 0) {
-          pid->SetOutputLimits(0, MAX_MOTOR_PWM);
-        } else {
-          pid->SetOutputLimits(-MAX_MOTOR_PWM, 0);
         }
       }
 
@@ -306,6 +302,7 @@ void process_command() {
   const static byte SET_VELOCITY_COMMAND = 0xC0;
   const static byte SET_PID_TUNINGS_COMMAND = 0xC1;
   const static byte SET_ACCELERATION_COMMAND = 0xC2;
+  const static byte SET_BRAKE_COMMAND = 0xC3;
 
   static short  left_motor_velocity = 0;
   static short right_motor_velocity = 0;
@@ -414,6 +411,27 @@ void process_command() {
 
     // Read and set the new acceleration
     left_motor.acceleration = right_motor.acceleration = Serial_ReadUnsignedShortBytes();
+
+    // All is well
+    Serial.write(ACK);
+  }
+
+  /* "Set Brake" command structure:
+   * - Recv: 2 bytes total
+   *   - command: byte = 0xC3
+   *   - brake  : boolean
+   * - Send: 1 byte total
+   *   - ACK: byte = 0xAA
+   */
+  else if (command == SET_BRAKE_COMMAND) {
+    if (Serial.available() < 2 || Serial.availableForWrite() < 1) {
+      return;
+    }
+
+    // Discard the command
+    Serial.read();
+
+    left_motor.brake = right_motor.brake = Serial.read();
 
     // All is well
     Serial.write(ACK);

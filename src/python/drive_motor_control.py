@@ -52,6 +52,8 @@ class DriveMotorController(Thread):
     _SET_PID_TUNINGS_RECV_STRUCT = struct.Struct('<cfff')
     _SET_ACCELERATION_COMMAND = b'\xC2'
     _SET_ACCELERATION_RECV_STRUCT = struct.Struct('<cH')
+    _SET_BRAKE_COMMAND = b'\xC3'
+    _SET_BRAKE_RECV_STRUCT = struct.Struct('<c?')
 
     def __init__(
             self,
@@ -115,6 +117,15 @@ class DriveMotorController(Thread):
         with self._lock:
             # Send the bytes for the "set acceleration" command
             self._conn.write(self._SET_ACCELERATION_RECV_STRUCT.pack(self._SET_ACCELERATION_COMMAND, acceleration))
+            self._conn.flush()
+
+            # Receive the response, hopefully it's an ACK
+            self._recv_ack()
+
+    def set_brake(self, brake: bool) -> None:
+        with self._lock:
+            # Send the bytes for the "Set Brake" command
+            self._conn.write(self._SET_BRAKE_RECV_STRUCT.pack(self._SET_BRAKE_COMMAND, brake))
             self._conn.flush()
 
             # Receive the response, hopefully it's an ACK
