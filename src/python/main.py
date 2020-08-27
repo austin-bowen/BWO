@@ -61,7 +61,7 @@ class DriveMotorsNode(Node):
         self._target_linear_velocity = 40 * message.data
 
     def _handle_left_trigger_pressure(self, message: Message):
-        brake = message.data >= 200
+        brake = message.data >= 0.5
 
         if (brake and not self._brake) or (not brake and self._brake):
             self._brake = brake
