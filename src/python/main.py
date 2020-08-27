@@ -19,8 +19,12 @@ class DriveMotorsNode(Node):
 
         self._target_linear_velocity = 0
         self._target_angular_velocity = 0
+        self._brake = False
+        self._brake_changed = Event()
+
         self.subscribe('remote_control.right_joystick_x', self._handle_left_joystick_x)
         self.subscribe('remote_control.left_joystick_y', self._handle_left_joystick_y)
+        self.subscribe('remote_control.left_trigger_pressure', self._handle_left_trigger_pressure)
 
     def loop(self) -> None:
         self.log('Search for motor controller...')
@@ -37,6 +41,10 @@ class DriveMotorsNode(Node):
                 self.log('Connected.')
 
                 while not self._stop_flag.wait(timeout=0.1):
+                    if self._brake_changed.is_set():
+                        self._brake_changed.clear()
+                        drive_motors.set_brake(self._brake)
+
                     state = drive_motors.set_velocity_unicycle(
                         self._target_linear_velocity,
                         self._target_angular_velocity
@@ -51,6 +59,13 @@ class DriveMotorsNode(Node):
 
     def _handle_left_joystick_y(self, message: Message):
         self._target_linear_velocity = 40 * message.data
+
+    def _handle_left_trigger_pressure(self, message: Message):
+        brake = message.data >= 200
+
+        if (brake and not self._brake) or (not brake and self._brake):
+            self._brake = brake
+            self._brake_changed.set()
 
 
 class GamesirNode(Node):
@@ -143,8 +158,8 @@ class ServosNode(Node):
             with MicroMaestro(tty=serial_port.device) as servo_control:
                 self.log('Connected.')
 
-                servo_control.set_acceleration(0, 0);
-                servo_control.set_acceleration(1, 0);
+                servo_control.set_acceleration(0, 0)
+                servo_control.set_acceleration(1, 0)
 
                 while not self._stop_flag.wait(timeout=0.1):
                     if self._targets_changed.is_set():
@@ -186,7 +201,7 @@ class Point:
 
 
 def test_remote_control_nodes():
-    def handle_terminate_signal(*unused):
+    def handle_terminate_signal(signum, frame):
         print('Sending stop signal...')
         Node.publish('easybot.stop')
 
@@ -200,7 +215,7 @@ def test_remote_control_nodes():
         ServosNode()
     ])
 
-    #node_runner.print_messages_matching(r'drive_motors\..+')
+    # node_runner.print_messages_matching(r'drive_motors\..+')
 
     node_runner.run()
 
