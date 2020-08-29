@@ -179,7 +179,7 @@ class ServosNode(Node):
             self.log('Disconnected.')
 
     def _handle_right_joystick_x(self, message: Message) -> None:
-        self._targets[1] = 1500 - 500 * message.data
+        self._targets[1] = 1535 - 500 * message.data
         self._targets_changed.set()
 
     def _handle_right_joystick_y(self, message: Message) -> None:
