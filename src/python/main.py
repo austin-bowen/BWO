@@ -21,10 +21,12 @@ class DriveMotorsNode(Node):
         self._target_angular_velocity = 0
         self._brake = False
         self._brake_changed = Event()
+        self._boost = False
 
         self.subscribe('remote_control.right_joystick_x', self._handle_left_joystick_x)
         self.subscribe('remote_control.left_joystick_y', self._handle_left_joystick_y)
         self.subscribe('remote_control.left_trigger_pressure', self._handle_left_trigger_pressure)
+        self.subscribe('remote_control.right_trigger_pressure', self._handle_right_trigger_pressure)
 
     def loop(self) -> None:
         self.log('Search for motor controller...')
@@ -46,7 +48,7 @@ class DriveMotorsNode(Node):
                         drive_motors.set_brake(self._brake)
 
                     state = drive_motors.set_velocity_unicycle(
-                        self._target_linear_velocity,
+                        self._target_linear_velocity * (2 if self._boost else 1),
                         self._target_angular_velocity
                     )
 
@@ -66,6 +68,9 @@ class DriveMotorsNode(Node):
         if (brake and not self._brake) or (not brake and self._brake):
             self._brake = brake
             self._brake_changed.set()
+
+    def _handle_right_trigger_pressure(self, message: Message):
+        self._boost = message.data >= 0.5
 
 
 class GamesirNode(Node):
