@@ -143,7 +143,8 @@ class ServosNode(Node):
     def __init__(self):
         super().__init__('Servos', 5)
 
-        self._targets = {0: 1500, 1: 1500}
+        self._centers = {0: 1450, 1: 1535}
+        self._targets = dict(self._centers)
         self._targets_changed = Event()
         self._targets_changed.set()
 
@@ -165,6 +166,8 @@ class ServosNode(Node):
 
                 servo_control.set_acceleration(0, 0)
                 servo_control.set_acceleration(1, 0)
+                servo_control.set_speed(0, 50)
+                servo_control.set_speed(1, 50)
 
                 while not self._stop_flag.wait(timeout=0.1):
                     if self._targets_changed.is_set():
@@ -175,15 +178,21 @@ class ServosNode(Node):
                         topic = f'servos.channel.{channel}.position'
                         data = servo_control.get_position(channel)
                         self.publish(topic, data)
+
+                # Put the head down
+                targets = dict(self._centers)
+                targets[0] -= 500
+                servo_control.set_targets(targets)
+                time.sleep(1)
         finally:
             self.log('Disconnected.')
 
     def _handle_right_joystick_x(self, message: Message) -> None:
-        self._targets[1] = 1535 - 500 * message.data
+        self._targets[1] = self._centers[1] - 500 * message.data
         self._targets_changed.set()
 
     def _handle_right_joystick_y(self, message: Message) -> None:
-        self._targets[0] = 1450 + 500 * message.data
+        self._targets[0] = self._centers[0] + 500 * message.data
         self._targets_changed.set()
 
 
