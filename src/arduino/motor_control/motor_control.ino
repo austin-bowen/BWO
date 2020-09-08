@@ -8,6 +8,7 @@
 
 
 #include <PID_saltyhash.h>
+#include "wiring_analog_extras.h"
 
 
 #define RIGHT_MOTOR_PWM_PIN   9
@@ -26,9 +27,7 @@
 
 #define LEFT 2
 #define RIGHT 1
-#define MIN_MOTOR_PWM 1
-//#define MAX_MOTOR_PWM 128
-#define MAX_MOTOR_PWM 192
+#define MAX_MOTOR_PWM 255
 
 
 typedef signed long ticks_t;
@@ -83,18 +82,22 @@ class Motor {
     }
 
     /* Args:
-     *   speed: [-MAX_MOTOR_PWM, MAX_MOTOR_PWM]
+     *   velocity: [-MAX_MOTOR_PWM, MAX_MOTOR_PWM]
      */
-    void SetPwm(int speed) {
-      // Limit the motor speed to [-MAX_MOTOR_PWM, MAX_MOTOR_PWM]
-      speed = constrain(speed, -MAX_MOTOR_PWM, MAX_MOTOR_PWM);
+    void SetPwm(int velocity) {
+      // Limit the motor velocity to [-MAX_MOTOR_PWM, MAX_MOTOR_PWM]
+      velocity = constrain(velocity, -MAX_MOTOR_PWM, MAX_MOTOR_PWM);
 
-      // Clamp the speed to [-255, 255]
-      speed = constrain(speed, -255, 255);
+      // Clamp the velocity to [-255, 255]
+      velocity = constrain(velocity, -255, 255);
+
+      // With a 20kHz PWM signal, the motors don't respond until the duty cycle is ~50%,
+      // so scale the speed to be in the range of [128, 255], if the velocity is not 0.
+      const unsigned int speed = velocity == 0 ? 0 : abs(velocity) / 2 + 128;
 
       // Determine direction pin state
-      analogWrite(pwm_pin, abs(speed));
-      digitalWrite(dir_pin, speed < 0);
+      analogWrite20kHz(pwm_pin, speed);
+      digitalWrite(dir_pin, velocity < 0);
     }
 
     /* Sets actual_velocity [ticks / s]. */
@@ -292,7 +295,26 @@ void setup_motors() {
 
 
 void loop() {
+  //debug();
   process_command();
+}
+
+
+void debug() {
+  static short motor_velocity = 0;
+
+  if (Serial.available()) {
+    motor_velocity = Serial.parseInt();
+
+    while (Serial.available()) {
+      Serial.read();
+    }
+  }
+
+  left_motor.debug = right_motor.debug = true;
+
+  left_motor.SetTargetVelocity(motor_velocity);
+  //right_motor.SetTargetVelocity(motor_velocity);
 }
 
 
