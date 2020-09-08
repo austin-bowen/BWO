@@ -133,6 +133,14 @@ class GamesirNode(Node):
             # Scale from [0, 255] to [0, 1]
             value = event.value / 255
 
+        elif event_code == controller.EventCode.X_BUTTON:
+            topic = 'x_button'
+            value = event.value
+
+        elif event_code == controller.EventCode.Y_BUTTON:
+            topic = 'y_button'
+            value = event.value
+
         else:
             return
 
@@ -150,6 +158,8 @@ class ServosNode(Node):
 
         self.subscribe('remote_control.right_joystick_x', self._handle_right_joystick_x)
         self.subscribe('remote_control.right_joystick_y', self._handle_right_joystick_y)
+        self.subscribe('remote_control.x_button', self._handle_x_button)
+        self.subscribe('remote_control.y_button', self._handle_y_button)
 
     def loop(self) -> None:
         self.log('Searching for Maestro...')
@@ -195,6 +205,66 @@ class ServosNode(Node):
         self._targets[0] = self._centers[0] + 500 * message.data
         self._targets_changed.set()
 
+    def _handle_x_button(self, message: Message) -> None:
+        if not message.data:
+            return
+
+        from threading import Thread
+        class ShakeHead(Thread):
+            delta = 200
+
+            def __init__(self, servos, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.servos = servos
+
+            def run(self):
+                center = self.servos._targets[1]
+
+                self.servos._targets[1] = center + self.delta
+                self.servos._targets_changed.set()
+                time.sleep(0.2)
+
+                for target in (-1, 1, -1):
+                    self.servos._targets[1] = center + target * self.delta
+                    self.servos._targets_changed.set()
+                    time.sleep(0.4)
+
+                self.servos._targets[1] = center
+                self.servos._targets_changed.set()
+                time.sleep(0.2)
+
+        ShakeHead(self).start()
+
+    def _handle_y_button(self, message: Message) -> None:
+        if not message.data:
+            return
+
+        from threading import Thread
+        class Nod(Thread):
+            delta = 200
+
+            def __init__(self, servos, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.servos = servos
+
+            def run(self):
+                center = self.servos._targets[0]
+
+                self.servos._targets[0] = center + self.delta
+                self.servos._targets_changed.set()
+                time.sleep(0.2)
+
+                for target in (-1, 1, -1):
+                    self.servos._targets[0] = center + target * self.delta
+                    self.servos._targets_changed.set()
+                    time.sleep(0.4)
+
+                self.servos._targets[0] = center
+                self.servos._targets_changed.set()
+                time.sleep(0.2)
+
+        Nod(self).start()
+
 
 class Point:
     def __init__(self, x, y) -> None:
@@ -229,7 +299,7 @@ def test_remote_control_nodes():
         ServosNode()
     ])
 
-    # node_runner.print_messages_matching(r'drive_motors\..+')
+    node_runner.print_messages_matching(r'remote_control\.._button')
 
     node_runner.run()
 
