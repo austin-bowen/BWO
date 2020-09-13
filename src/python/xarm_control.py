@@ -40,12 +40,7 @@ class Xarm:
         finally:
             self._conn.close()
 
-    def _send_packet(
-            self,
-            servo_id: int,
-            command: int,
-            parameters: Union[bytearray, bytes] = None
-    ) -> None:
+    def _send_packet(self, servo_id: int, command: int, parameters: Union[bytearray, bytes] = None) -> None:
         # The xArm servo command packet format is as follows:
         #
         #     | Header: byte[2] = 0x55 0x55 | ID: byte | Length: byte | Command: byte |
@@ -76,10 +71,16 @@ class Xarm:
         checksum = ~checksum & 0xFF
         servo_packet.append(checksum)
 
-        # Insert the total length of the packet at the beginning of the packet, and send
+        # Insert the total length of the packet at the beginning of the packet
         servo_packet.insert(0, len(servo_packet))
         with self._conn_lock:
+            # Send the packet
             self._conn.write(servo_packet)
+
+            # Wait for the ACK
+            response = self._conn.read(1)[0]
+            if response != 0xAA:
+                raise XarmException(f'Expected to receive ACK (0xAA); received 0x{response:x}.')
 
     def _receive_packet(self) -> ServoPacket:
         with self._conn_lock:

@@ -61,6 +61,9 @@ void fromComputerToArm() {
 
   // Set the UART TX pin high so we can receive data from the xArm
   digitalWrite(UART_TX_PIN, true);
+
+  // Let the computer know that we have sent the data
+  Serial.write(0xAA);
 }
 
 
