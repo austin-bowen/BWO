@@ -1,10 +1,11 @@
 import struct
 from multiprocessing import RLock
-from typing import Union, NamedTuple, Literal
+from typing import Union, NamedTuple, Literal, Tuple
 
 import serial
 import serial.tools.list_ports
 
+BROADCAST_ID = 254
 Real = Union[float, int]
 
 
@@ -31,12 +32,12 @@ class Xarm:
         self._conn_lock = RLock()
 
     def __enter__(self):
-        self.set_all_powered(True)
+        self.set_powered(BROADCAST_ID, True)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         try:
-            self.set_all_powered(False)
+            self.set_powered(BROADCAST_ID, False)
         finally:
             self._conn.close()
 
@@ -107,24 +108,17 @@ class Xarm:
     def led_ctrl_write(self, servo_id: int, state: bool) -> None:
         self._send_packet(servo_id, 33, b'\x00' if state else b'\x01')
 
-    def led_ctrl_write_all(self, state: bool) -> None:
-        for servo_id in self.ALL_SERVO_IDS:
-            self.led_ctrl_write(servo_id, state)
-
-            # TODO: Figure out why we can't just send all the commands ASAP
-            import time
-            time.sleep(0.1)
-
-    def move_stop(self, servo_id: int) -> None:
-        self._send_packet(servo_id, 12)
-
-    def move_time_write(self, servo_id: int, angle_degrees: Real, time_s: Real):
+    def _move_time_write(self, servo_id: int, angle_degrees: Real, time_s: Real, command: Literal[1, 7]) -> None:
         """
         :param servo_id:
         :param angle_degrees: Should be in the range [0, 240] degrees; will be truncated if outside this range.
         :param time_s: Should be in the range [0, 30] s; will be truncated if outside this range.
+        :param command: Acceptable values are 1 for SERVO_MOVE_TIME_WRITE, or 7 for SERVO_MOVE_TIME_WAIT_WRITE.
         :return:
         """
+
+        if command not in {1, 7}:
+            raise ValueError(f'Command must be either 1 or 7; got {command}.')
 
         angle_degrees = min(max(0, angle_degrees), 240)
         time_s = min(max(0, time_s), 30)
@@ -137,7 +131,63 @@ class Xarm:
         params.append((time_ms >> 0) & 0xFF)
         params.append((time_ms >> 8) & 0xFF)
 
-        self._send_packet(servo_id, 1, params)
+        self._send_packet(servo_id, command, params)
+
+    def move_time_write(self, servo_id: int, angle_degrees: Real, time_s: Real) -> None:
+        """
+        :param servo_id:
+        :param angle_degrees: Should be in the range [0, 240] degrees; will be truncated if outside this range.
+        :param time_s: Should be in the range [0, 30] s; will be truncated if outside this range.
+        :return:
+        """
+
+        return self._move_time_write(servo_id, angle_degrees, time_s, command=1)
+
+    def move_time_wait_write(self, servo_id: int, angle_degrees: Real, time_s: Real) -> None:
+        """
+        :param servo_id:
+        :param angle_degrees: Should be in the range [0, 240] degrees; will be truncated if outside this range.
+        :param time_s: Should be in the range [0, 30] s; will be truncated if outside this range.
+        :return:
+        """
+
+        return self._move_time_write(servo_id, angle_degrees, time_s, command=7)
+
+    def _move_time_read(self, servo_id: int, command: Literal[2, 8]) -> Tuple[float, float]:
+        """
+        TODO: This docstring.
+        TODO: Test.
+        :return: (angle_degrees, time_s)
+        """
+
+        response = self._send_and_receive_packet(servo_id, 2)
+        params = response.parameters
+
+        angle_degrees = (params[1] << 8) | params[0]
+        angle_degrees *= 240 / 1000
+
+        time_s = (params[3] << 8) | params[2]
+        time_s /= 1000
+
+        return angle_degrees, time_s
+
+    def move_time_read(self, servo_id: int) -> Tuple[float, float]:
+        return self._move_time_read(servo_id, command=2)
+
+    def move_time_wait_read(self, servo_id: int) -> Tuple[float, float]:
+        return self._move_time_read(servo_id, command=8)
+
+    def move_start(self, servo_id: int) -> None:
+        self._send_packet(servo_id, 11)
+
+    def move_stop(self, servo_id: int) -> None:
+        self._send_packet(servo_id, 12)
+
+    def id_write(self, old_id: int, new_id: int) -> None:
+        if new_id < 0 or new_id > 253:
+            raise XarmException(f'new_id must be in range [0, 253]; got {new_id}.')
+
+        self._send_packet(old_id, 13, bytes((new_id,)))
 
     def temp_read(self, servo_id: int, units: Literal['C', 'F'] = 'F') -> float:
         """
@@ -178,12 +228,6 @@ class Xarm:
         angle = self._SIGNED_SHORT_STRUCT.unpack(response.parameters)[0]
         return angle * 240 / 1000
 
-    def set_all_powered(self, powered: bool) -> None:
-        """Sets all six servos to be [un]powered."""
-
-        for servo_id in self.ALL_SERVO_IDS:
-            self.set_powered(servo_id, powered)
-
     def set_powered(self, servo_id: int, powered: bool) -> None:
         self._send_packet(servo_id, 31, b'\x01' if powered else b'\x00')
 
@@ -194,7 +238,7 @@ class XarmException(Exception):
 
 def main():
     with Xarm(r'/dev/ttyACM\d+') as arm:
-        arm.led_ctrl_write_all(False)
+        arm.led_ctrl_write(BROADCAST_ID, False)
         print(f'temp = {arm.temp_read(2)}')
         print(f'vin = {arm.vin_read(2)}')
         arm.move_time_write(2, 90, 1)
@@ -203,7 +247,7 @@ def main():
         arm.move_time_write(2, 180, 10)
         time.sleep(5)
         arm.move_stop(2)
-        arm.led_ctrl_write_all(True)
+        arm.led_ctrl_write(BROADCAST_ID, True)
 
         while True:
             try:
