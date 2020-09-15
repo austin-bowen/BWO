@@ -2,8 +2,9 @@
 """
 
 import struct
+import time
 from multiprocessing import RLock
-from typing import Union, NamedTuple, Literal, Tuple
+from typing import Union, NamedTuple, Literal, Tuple, List
 
 import serial
 import serial.tools.list_ports
@@ -245,6 +246,40 @@ class Xarm:
     def move_time_wait_read(self, servo_id: int) -> Tuple[float, float]:
         return self._move_time_read(servo_id, command=_SERVO_MOVE_TIME_WAIT_READ)
 
+    def move_speed_write(self, servo_id: int, angle_degrees: Real, speed_dps: Real) -> None:
+        """
+        Tells the servo to go to the specified angle at a certain speed.
+
+        :param servo_id:
+        :param angle_degrees: Should be in the range [0, 240] degrees; will be truncated if outside this range.
+        :param speed_dps: The speed in degrees-per-second that the servo should move to the target.
+        """
+
+        current_angle = self.pos_read(servo_id)
+        error = abs(angle_degrees - current_angle)
+        time_s = error / speed_dps
+
+        self.move_time_write(servo_id, angle_degrees, time_s)
+
+    def velocity_read(self, *servo_ids: int, period_s: Real = 0.1) -> List[float]:
+        """
+        :param servo_ids: One or more servo IDs.
+        :param period_s: The observation period -- how long to wait between position measurements.
+        :return: The current velocity of the servo in degrees per second (may be negative).
+        """
+
+        measurements0 = [(time.monotonic(), self.pos_read(servo_id)) for servo_id in servo_ids]
+        time.sleep(period_s)
+        measurements1 = [(time.monotonic(), self.pos_read(servo_id)) for servo_id in servo_ids]
+
+        velocities = []
+        for measurement0, measurement1 in zip(measurements0, measurements1):
+            time0, position0 = measurement0
+            time1, position1 = measurement1
+            velocities.append((position1 - position0) / (time1 - time0))
+
+        return velocities
+
     def move_start(self, servo_id: int) -> None:
         self._send_packet(servo_id, _SERVO_MOVE_START)
 
@@ -469,8 +504,8 @@ def control(arm: Xarm):
     while True:
         try:
             command = input()
-            servo_id, angle, time = [a.strip() for a in command.split(',')]
-            servo_id, angle, time = int(servo_id), float(angle), float(time)
+            servo_id, angle, time_s = [a.strip() for a in command.split(',')]
+            servo_id, angle, time_s = int(servo_id), float(angle), float(time_s)
         except KeyboardInterrupt:
             print()
             return
@@ -478,12 +513,28 @@ def control(arm: Xarm):
             print('Error:', e)
             continue
 
-        arm.move_time_write(servo_id, angle, time)
+        arm.move_time_write(servo_id, angle, time_s)
+        # arm.move_speed_write(servo_id, angle, time_s)
 
     arm.set_powered(BROADCAST_ID, False)
 
 
+def show_velocities(arm: Xarm) -> None:
+    while True:
+        vs = arm.velocity_read(*SERVO_IDS)
+        vs = [int(round(v)) for v in vs]
+        print('\t'.join(map(str, vs)))
+
+
 def test(arm: Xarm) -> int:
+    errors = 0
+
+    def start_test(name: str) -> None:
+        print(f'Testing {name}... ', end='', flush=True)
+
+    def end_test(success: bool) -> None:
+        print('Pass' if success else 'FAIL!')
+
     arm.led_ctrl_write(BROADCAST_ID, False)
     print(f'temp = {arm.temp_read(2)}')
     print(f'vin = {arm.vin_read(2)}')
@@ -495,7 +546,9 @@ def test(arm: Xarm) -> int:
     arm.move_stop(2)
     arm.led_ctrl_write(BROADCAST_ID, True)
 
-    return 0
+    end_test(False)
+
+    return errors
 
 
 def main() -> int:
