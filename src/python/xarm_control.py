@@ -166,16 +166,18 @@ class Xarm:
 
         return _ServoPacket(servo_id, length, command, parameters, checksum)
 
-    def _send_and_receive_packet(self, *args, **kwargs) -> _ServoPacket:
+    def _send_and_receive_packet(
+            self, servo_id: int,
+            command: int,
+            parameters: Union[bytearray, bytes] = None
+    ) -> _ServoPacket:
         with self._conn_lock:
-            self._send_packet(*args, **kwargs)
+            self._send_packet(servo_id, command, parameters=parameters)
             return self._receive_packet()
 
     def _move_time_write(self, servo_id: int, angle_degrees: Real, time_s: Real, command: int) -> None:
         """
         TODO: This.
-
-        TODO: Test.
 
         :param servo_id:
         :param angle_degrees: Should be in the range [0, 240] degrees; will be truncated if outside this range.
@@ -379,20 +381,96 @@ class Xarm:
         return min_angle_degrees, max_angle_degrees
 
     def vin_limit_write(self, servo_id: int, min_voltage: Real, max_voltage: Real) -> None:
-        # TODO: This.
-        ...
+        """
+        Sets the minimum and maximum supply voltages allowed to power the servo.
+        If the supply voltage goes outside the specified range, the servos will be powered off.
+        This setting will persist after a servo loses power.
+
+        TODO: Test.
+
+        :param servo_id:
+        :param min_voltage: Should be in the range [4.5, 12] volts; anything out of range will be truncated.
+            This should be lower than max_voltage.
+        :param max_voltage: Should be in the range [4.5, 12] volts; anything out of range will be truncated.
+            This should be higher than min_voltage.
+        """
+
+        def scrub_voltage(v: Real) -> int:
+            """Converts to mV and limits to range [4500, 12000]."""
+            v = int(round(v * 1000))
+            return min(max(4500, v), 12000)
+
+        min_voltage_mv = scrub_voltage(min_voltage)
+        max_voltage_mv = scrub_voltage(max_voltage)
+
+        if min_voltage_mv > max_voltage_mv:
+            raise ValueError(
+                f'min_voltage must be less than max_voltage; '
+                f'got min_voltage={min_voltage} (==> min_voltage_mv={min_voltage_mv}) '
+                f'and max_voltage={max_voltage} (==> max_voltage_mv={max_voltage_mv}).'
+            )
+
+        params = _2_UNSIGNED_SHORTS_STRUCT.pack(min_voltage_mv, max_voltage_mv)
+        self._send_packet(servo_id, _SERVO_VIN_LIMIT_WRITE, params)
 
     def vin_limit_read(self, servo_id: int) -> Tuple[float, float]:
-        # TODO: This.
-        ...
+        """
+        TODO: Test.
+
+        :param servo_id:
+        :return: A tuple of the (min_voltage, max_voltage) settings in Volts.
+        """
+
+        response = self._send_and_receive_packet(servo_id, _SERVO_VIN_LIMIT_READ)
+
+        min_voltage_mv, max_voltage_mv = _2_UNSIGNED_SHORTS_STRUCT.unpack(response.parameters)
+        min_voltage = min_voltage_mv / 1000
+        max_voltage = max_voltage_mv / 1000
+
+        return min_voltage, max_voltage
 
     def temp_max_limit_write(self, servo_id: int, temp: Real, units: Literal['C', 'F'] = 'F') -> None:
-        # TODO: This.
-        ...
+        """
+        Sets the maximum allowed temperature at which the servo will operate.
+        If the servo temperature exceeds this limit, then the motor will be powered off.
+        This setting persists after a servo loses power.
+
+        TODO: Test.
+
+        :param servo_id:
+        :param temp: Max allowed temperature. Should be in range [50, 100] C or [122, 212] F.
+            Will be truncated if out of range. Default is 85 C or 185 F.
+        :param units: Use 'C' for Celsius or 'F' for Fahrenheit.
+        """
+
+        units = _validate_temp_units(units)
+
+        if units == 'F':
+            temp = _fahrenheit_to_celsius(temp)
+
+        temp = int(round(temp))
+        temp = min(max(50, temp), 100)
+
+        self._send_packet(servo_id, _SERVO_TEMP_MAX_LIMIT_WRITE, bytes((temp,)))
 
     def temp_max_limit_read(self, servo_id: int, units: Literal['C', 'F'] = 'F') -> float:
-        # TODO: This.
-        ...
+        """
+        TODO: Test.
+
+        :param servo_id:
+        :param units: Use 'C' for Celsius or 'F' for Fahrenheit.
+        :return: The max allowed temperature, in degrees Celsius or Fahrenheit.
+        """
+
+        units = _validate_temp_units(units)
+
+        response = self._send_and_receive_packet(servo_id, _SERVO_TEMP_MAX_LIMIT_READ)
+
+        temp = float(response.parameters[0])
+        if units == 'F':
+            temp = _celsius_to_fahrenheit(temp)
+
+        return temp
 
     def temp_read(self, servo_id: int, units: Literal['C', 'F'] = 'F') -> float:
         """
@@ -402,9 +480,7 @@ class Xarm:
         :param units: Use 'C' for Celsius or 'F' for Fahrenheit.
         """
 
-        units = units.upper()
-        if units not in {'C', 'F'}:
-            raise ValueError(f'Units must be either "C" or "F"; got "{units}".')
+        units = _validate_temp_units(units)
 
         response = self._send_and_receive_packet(servo_id, _SERVO_TEMP_READ)
 
@@ -412,7 +488,7 @@ class Xarm:
         temp = float(response.parameters[0])
 
         # Convert to Fahrenheit?
-        if units == 'F':
+        if units.upper() == 'F':
             temp = _celsius_to_fahrenheit(temp)
 
         return temp
@@ -434,8 +510,12 @@ class Xarm:
         return _ticks_to_degrees(angle)
 
     def mode_write(self, servo_id: int, mode: Literal['motor', 'servo']) -> None:
-        # TODO: This.
-        ...
+        """
+
+        :param servo_id:
+        :param mode:
+        :return:
+        """
 
     def mode_read(self, servo_id: int) -> Literal['motor', 'servo']:
         # TODO: This.
@@ -494,6 +574,13 @@ def _truncate_angle(angle_degrees: Real) -> Real:
     """:return: The angle, truncated to be in the range [0, 240] degrees."""
 
     return min(max(MIN_ANGLE_DEGREES, angle_degrees), MAX_ANGLE_DEGREES)
+
+
+def _validate_temp_units(units: str) -> str:
+    if units.upper() not in {'C', 'F'}:
+        raise ValueError(f'Units must be either "C" or "F"; got "{units}".')
+
+    return units.upper()
 
 
 def control(arm: Xarm):
