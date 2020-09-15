@@ -164,7 +164,7 @@ class Xarm:
             self._send_packet(*args, **kwargs)
             return self._receive_packet()
 
-    def _move_time_write(self, servo_id: int, angle_degrees: Real, time_s: Real, command: Literal[1, 7]) -> None:
+    def _move_time_write(self, servo_id: int, angle_degrees: Real, time_s: Real, command: int) -> None:
         """
         TODO: This.
 
@@ -173,12 +173,13 @@ class Xarm:
         :param servo_id:
         :param angle_degrees: Should be in the range [0, 240] degrees; will be truncated if outside this range.
         :param time_s: Should be in the range [0, 30] seconds; will be truncated if outside this range.
-        :param command: Acceptable values are 1 for SERVO_MOVE_TIME_WRITE, or 7 for SERVO_MOVE_TIME_WAIT_WRITE.
-        :return:
+        :param command: Acceptable values are _SERVO_MOVE_TIME_WRITE, or _SERVO_MOVE_TIME_WAIT_WRITE.
         """
 
-        if command not in {1, 7}:
-            raise ValueError(f'Command must be either 1 or 7; got {command}.')
+        if command not in {_SERVO_MOVE_TIME_WRITE, _SERVO_MOVE_TIME_WAIT_WRITE}:
+            raise ValueError(
+                f'Command must be either {_SERVO_MOVE_TIME_WRITE} or {_SERVO_MOVE_TIME_WAIT_WRITE}; got {command}.'
+            )
 
         angle_degrees = _truncate_angle(angle_degrees)
         angle = _degrees_to_ticks(angle_degrees)
@@ -197,7 +198,7 @@ class Xarm:
         :return:
         """
 
-        return self._move_time_write(servo_id, angle_degrees, time_s, command=1)
+        return self._move_time_write(servo_id, angle_degrees, time_s, command=_SERVO_MOVE_TIME_WRITE)
 
     def move_time_wait_write(self, servo_id: int, angle_degrees: Real, time_s: Real) -> None:
         """
@@ -207,14 +208,21 @@ class Xarm:
         :return:
         """
 
-        return self._move_time_write(servo_id, angle_degrees, time_s, command=7)
+        return self._move_time_write(servo_id, angle_degrees, time_s, command=_SERVO_MOVE_TIME_WAIT_WRITE)
 
-    def _move_time_read(self, servo_id: int, command: Literal[2, 8]) -> Tuple[float, float]:
+    def _move_time_read(self, servo_id: int, command: int) -> Tuple[float, float]:
         """
         TODO: This docstring.
         TODO: Test.
+        :param servo_id:
+        :param command: Either _SERVO_MOVE_TIME_READ or _SERVO_MOVE_TIME_WAIT_READ.
         :return: (angle_degrees, time_s)
         """
+
+        if command not in {_SERVO_MOVE_TIME_READ, _SERVO_MOVE_TIME_WAIT_READ}:
+            raise ValueError(
+                f'Command must be either {_SERVO_MOVE_TIME_READ} or {_SERVO_MOVE_TIME_WAIT_READ}; got {command}.'
+            )
 
         response = self._send_and_receive_packet(servo_id, command)
 
@@ -226,22 +234,22 @@ class Xarm:
         return angle_degrees, time_s
 
     def move_time_read(self, servo_id: int) -> Tuple[float, float]:
-        return self._move_time_read(servo_id, command=2)
+        return self._move_time_read(servo_id, command=_SERVO_MOVE_TIME_READ)
 
     def move_time_wait_read(self, servo_id: int) -> Tuple[float, float]:
-        return self._move_time_read(servo_id, command=8)
+        return self._move_time_read(servo_id, command=_SERVO_MOVE_TIME_WAIT_READ)
 
     def move_start(self, servo_id: int) -> None:
-        self._send_packet(servo_id, 11)
+        self._send_packet(servo_id, _SERVO_MOVE_START)
 
     def move_stop(self, servo_id: int) -> None:
-        self._send_packet(servo_id, 12)
+        self._send_packet(servo_id, _SERVO_MOVE_STOP)
 
     def id_write(self, old_id: int, new_id: int) -> None:
         if new_id < 0 or new_id > 253:
             raise ValueError(f'new_id must be in range [0, 253]; got {new_id}.')
 
-        self._send_packet(old_id, 13, bytes((new_id,)))
+        self._send_packet(old_id, _SERVO_ID_WRITE, bytes((new_id,)))
 
     def angle_offset_adjust(self, servo_id: int, offset_degrees: Real, write: bool = True) -> None:
         """
@@ -357,7 +365,7 @@ class Xarm:
         if units not in {'C', 'F'}:
             raise ValueError(f'Units must be either "C" or "F"; got "{units}".')
 
-        response = self._send_and_receive_packet(servo_id, 26)
+        response = self._send_and_receive_packet(servo_id, _SERVO_TEMP_READ)
 
         # This is initially in Celsius
         temp = float(response.parameters[0])
@@ -371,7 +379,7 @@ class Xarm:
     def vin_read(self, servo_id: int) -> float:
         """Reads the input voltage to the servo."""
 
-        response = self._send_and_receive_packet(servo_id, 27)
+        response = self._send_and_receive_packet(servo_id, _SERVO_VIN_READ)
 
         vin_mv = _1_SIGNED_SHORT_STRUCT.unpack(response.parameters)[0]
         return vin_mv / 1000
@@ -379,7 +387,7 @@ class Xarm:
     def pos_read(self, servo_id: int) -> float:
         """Reads the servo angle, in degrees. May be negative."""
 
-        response = self._send_and_receive_packet(servo_id, 28)
+        response = self._send_and_receive_packet(servo_id, _SERVO_POS_READ)
 
         angle = _1_SIGNED_SHORT_STRUCT.unpack(response.parameters)[0]
         return _ticks_to_degrees(angle)
@@ -393,14 +401,14 @@ class Xarm:
         ...
 
     def set_powered(self, servo_id: int, powered: bool) -> None:
-        self._send_packet(servo_id, 31, b'\x01' if powered else b'\x00')
+        self._send_packet(servo_id, _SERVO_LOAD_OR_UNLOAD_WRITE, b'\x01' if powered else b'\x00')
 
     def is_powered(self, servo_id: int) -> bool:
-        response = self._send_and_receive_packet(servo_id, 32)
+        response = self._send_and_receive_packet(servo_id, _SERVO_LOAD_OR_UNLOAD_READ)
         return bool(response.parameters[0])
 
     def led_ctrl_write(self, servo_id: int, state: bool) -> None:
-        self._send_packet(servo_id, 33, b'\x00' if state else b'\x01')
+        self._send_packet(servo_id, _SERVO_LED_CTRL_WRITE, b'\x00' if state else b'\x01')
 
     def led_ctrl_read(self, servo_id: int) -> bool:
         # TODO: This.
