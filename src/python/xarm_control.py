@@ -1,6 +1,4 @@
 """
-TODO: Check the checksum.
-TODO: Use constants for command numbers instead of magic numbers.
 """
 
 import struct
@@ -78,7 +76,8 @@ class Xarm:
             serial_port_regexp: str,
             timeout: float = None,
             on_enter_power_on: bool = False,
-            on_exit_power_off: bool = True
+            on_exit_power_off: bool = True,
+            verify_checksum: bool = True
     ) -> None:
         try:
             port_info = next(serial.tools.list_ports.grep(serial_port_regexp))
@@ -87,6 +86,7 @@ class Xarm:
 
         self.on_enter_power_on = on_enter_power_on
         self.on_exit_power_off = on_exit_power_off
+        self.verify_checksum = verify_checksum
 
         self._conn = serial.Serial(port=port_info.device, baudrate=115200, timeout=timeout)
         self._conn_lock = RLock()
@@ -119,20 +119,18 @@ class Xarm:
         if command < 0 or command > 255:
             raise XarmException(f'command must be in range [0, 255]; got {command}.')
 
+        if parameters is None:
+            parameters = b''
+
         servo_packet = bytearray(_PACKET_HEADER)
         servo_packet.append(servo_id)
-        length = 3
-        if parameters:
-            length += len(parameters)
+        length = 3 + len(parameters)
         servo_packet.append(length)
         servo_packet.append(command)
         if parameters:
             servo_packet.extend(parameters)
 
-        checksum = servo_id + length + command
-        if parameters:
-            checksum += sum(parameters)
-        checksum = ~checksum & 0xFF
+        checksum = _calculate_checksum(servo_id, length, command, parameters)
         servo_packet.append(checksum)
 
         # Insert the total length of the packet at the beginning of the packet
@@ -156,6 +154,14 @@ class Xarm:
             param_count = length - 3
             parameters = self._conn.read(param_count)
             checksum = self._conn.read(1)[0]
+
+        if self.verify_checksum:
+            actual_checksum = _calculate_checksum(servo_id, length, command, parameters)
+            if checksum != actual_checksum:
+                raise XarmException(
+                    f'Checksum failed for received packet! '
+                    f'Received checksum = {checksum}. Actual checksum = {actual_checksum}.'
+                )
 
         return _ServoPacket(servo_id, length, command, parameters, checksum)
 
@@ -425,6 +431,12 @@ class Xarm:
 
 class XarmException(Exception):
     pass
+
+
+def _calculate_checksum(servo_id: int, length: int, command: int, parameters: Union[bytearray, bytes]) -> int:
+    checksum = servo_id + length + command + sum(parameters)
+    checksum = ~checksum & 0xFF
+    return checksum
 
 
 def _celsius_to_fahrenheit(temp: Real) -> float:
