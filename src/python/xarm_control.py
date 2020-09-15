@@ -461,34 +461,67 @@ def _truncate_angle(angle_degrees: Real) -> Real:
     return min(max(MIN_ANGLE_DEGREES, angle_degrees), MAX_ANGLE_DEGREES)
 
 
-def main():
-    with Xarm(r'/dev/ttyACM\d+') as arm:
-        arm.led_ctrl_write(BROADCAST_ID, False)
-        print(f'temp = {arm.temp_read(2)}')
-        print(f'vin = {arm.vin_read(2)}')
-        arm.move_time_write(2, 90, 1)
-        import time
-        time.sleep(1)
-        arm.move_time_write(2, 180, 10)
-        time.sleep(5)
-        arm.move_stop(2)
-        arm.led_ctrl_write(BROADCAST_ID, True)
+def control(arm: Xarm):
+    print('Enter commands in the format (ID, angle [deg], time [s]):')
 
-        while True:
+    arm.set_powered(BROADCAST_ID, True)
+
+    while True:
+        try:
+            command = input()
+            servo_id, angle, time = [a.strip() for a in command.split(',')]
+            servo_id, angle, time = int(servo_id), float(angle), float(time)
+        except KeyboardInterrupt:
+            print()
+            return
+        except Exception as e:
+            print('Error:', e)
+            continue
+
+        arm.move_time_write(servo_id, angle, time)
+
+    arm.set_powered(BROADCAST_ID, False)
+
+
+def test(arm: Xarm) -> int:
+    arm.led_ctrl_write(BROADCAST_ID, False)
+    print(f'temp = {arm.temp_read(2)}')
+    print(f'vin = {arm.vin_read(2)}')
+    arm.move_time_write(2, 90, 1)
+    import time
+    time.sleep(1)
+    arm.move_time_write(2, 180, 10)
+    time.sleep(5)
+    arm.move_stop(2)
+    arm.led_ctrl_write(BROADCAST_ID, True)
+
+    return 0
+
+
+def main() -> int:
+    # Ask the user if they'd like to control or test the arm
+    choice = input('Would you like to [t]est or [c]ontrol the arm? ').strip().lower()
+
+    with Xarm(r'/dev/ttyACM\d+') as arm:
+        # Control the arm?
+        if choice == 'c':
             try:
-                servo_id, angle, time = input('(ID, angle [deg], time [s]): ').split(',')
-                servo_id, angle, time = int(servo_id), float(angle), float(time)
+                control(arm)
             except KeyboardInterrupt:
                 print()
-                break
-            except Exception as e:
-                print(e)
-                continue
+            return 0
 
-            print('Sending command...')
-            arm.move_time_write(servo_id, angle, time)
-            print('Done.')
+        # Test the arm?
+        elif choice == 't':
+            return test(arm)
+
+        # Invalid choice?
+        else:
+            print(f'Invalid choice "{choice}".')
+            return 1
 
 
 if __name__ == '__main__':
-    main()
+    import sys
+
+    sys.exit(main())
