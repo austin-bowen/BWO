@@ -10,9 +10,12 @@ from typing import Union, NamedTuple, Literal, Tuple
 import serial
 import serial.tools.list_ports
 
+# General servo constants
 BROADCAST_ID = 254
 MIN_ANGLE_DEGREES = 0
 MAX_ANGLE_DEGREES = 240
+
+# xArm servo IDs
 GRIPPER_ID = 1
 WRIST_ID = 2
 OUTER_ELBOW_ID = 3
@@ -21,6 +24,13 @@ SHOULDER_ID = 5
 BASE_ID = 6
 SERVO_IDS = (GRIPPER_ID, WRIST_ID, OUTER_ELBOW_ID, INNER_ELBOW_ID, SHOULDER_ID, BASE_ID)
 
+# Packet stuff
+_PACKET_HEADER = b'\x55\x55'
+_1_SIGNED_CHAR_STRUCT = struct.Struct('<b')
+_1_SIGNED_SHORT_STRUCT = struct.Struct('<h')
+_2_UNSIGNED_SHORTS_STRUCT = struct.Struct('<HH')
+
+# Servo command numbers
 _SERVO_MOVE_TIME_WRITE = 1
 _SERVO_MOVE_TIME_READ = 2
 _SERVO_MOVE_TIME_WAIT_WRITE = 7
@@ -50,10 +60,7 @@ _SERVO_LED_CTRL_READ = 34
 _SERVO_LED_ERROR_WRITE = 35
 _SERVO_LED_ERROR_READ = 36
 
-_1_SIGNED_CHAR_STRUCT = struct.Struct('<b')
-_1_SIGNED_SHORT_STRUCT = struct.Struct('<h')
-_2_UNSIGNED_SHORTS_STRUCT = struct.Struct('<HH')
-
+# Custom types
 Real = Union[float, int]
 
 
@@ -112,7 +119,7 @@ class Xarm:
         if command < 0 or command > 255:
             raise XarmException(f'command must be in range [0, 255]; got {command}.')
 
-        servo_packet = bytearray(b'\x55\x55')
+        servo_packet = bytearray(_PACKET_HEADER)
         servo_packet.append(servo_id)
         length = 3
         if parameters:
@@ -142,8 +149,8 @@ class Xarm:
     def _receive_packet(self) -> _ServoPacket:
         with self._conn_lock:
             header = self._conn.read(2)
-            if header != b'\x55\x55':
-                raise XarmException(rf'Expected header b"\x55\x55"; received header {repr(header)}.')
+            if header != _PACKET_HEADER:
+                raise XarmException(rf'Expected header {repr(_PACKET_HEADER)}; received header {repr(header)}.')
 
             servo_id, length, command = self._conn.read(3)
             param_count = length - 3
