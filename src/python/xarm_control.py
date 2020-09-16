@@ -1,5 +1,8 @@
 """
-TODO: This.
+Library for controlling a HiWonder xArm robot arm using the LewanSoul Bus Servo Communication Protocol.
+
+This code assumes that the computer running this code is connected to an Arduino-compatible microcontroller
+running the code in xarm_control.ino, which acts as a serial to half-duplex UART converter.
 """
 
 import struct
@@ -64,18 +67,15 @@ _SERVO_LED_ERROR_READ = 36
 Real = Union[float, int]
 
 
-# TODO: This could be removed with some refactoring
 class _ServoPacket(NamedTuple):
     servo_id: int
-    length: int
     command: int
     parameters: bytes
-    checksum: int
 
 
 class Xarm:
     """
-    Controls a HiWonder / LewanSoul xArm robot arm.
+    Controls a HiWonder xArm robot arm using the LewanSoul Bus Servo Communication Protocol.
 
     Example usage::
 
@@ -190,7 +190,7 @@ class Xarm:
                     f'Received checksum = {checksum}. Actual checksum = {actual_checksum}.'
                 )
 
-        return _ServoPacket(servo_id, length, command, parameters, checksum)
+        return _ServoPacket(servo_id, command, parameters)
 
     def _send_and_receive_packet(
             self, servo_id: int,
