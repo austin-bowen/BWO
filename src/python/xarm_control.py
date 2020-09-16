@@ -74,22 +74,36 @@ class _ServoPacket(NamedTuple):
 
 
 class Xarm:
+    """
+    Controls a HiWonder / LewanSoul xArm robot arm.
+
+    Example usage::
+
+        # Create a new Xarm instance using a "with ..." statement,
+        # which by default will power on all the servos.
+        with Xarm() as arm:
+            # Move the gripper servo to the 120 degree position over 1 second
+            arm.move_time_write(GRIPPER_ID, 120, 1)
+
+            # Wait a second for the servo to get in position before leaving the "with ..." statement,
+            # which by default will power off all the servos before closing the serial connection.
+            time.sleep(1)
+    """
+
     def __init__(
             self,
-            serial_port_regexp: str,
+            serial_port_regexp: str = r'/dev/ttyACM\d+',
             timeout: float = None,
             on_enter_power_on: bool = False,
             on_exit_power_off: bool = True,
             verify_checksum: bool = True
     ) -> None:
         """
-        TODO: This.
-
-        :param serial_port_regexp:
-        :param timeout:
-        :param on_enter_power_on:
-        :param on_exit_power_off:
-        :param verify_checksum:
+        :param serial_port_regexp: Search pattern passed to serial.tools.list_ports.grep used to find the controller.
+        :param timeout: How long to wait for a response from the controller before timing out. None means never timeout.
+        :param on_enter_power_on: If the servos should be powered on when entering a "with ..." statement.
+        :param on_exit_power_off: If the servos should be powered off when exiting a "with ..." statement.
+        :param verify_checksum: If the checksum byte of received packets should be checked.
         """
 
         try:
@@ -716,7 +730,7 @@ def main() -> int:
     # Ask the user if they'd like to control or test the arm
     choice = input('Would you like to [t]est or [c]ontrol the arm? ').strip().lower()
 
-    with Xarm(r'/dev/ttyACM\d+') as arm:
+    with Xarm() as arm:
         # Control the arm?
         if choice == 'c':
             try:
