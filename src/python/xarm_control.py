@@ -217,11 +217,12 @@ class Xarm:
 
         return response
 
-    def _move_time_write(self, servo_id: int, angle_degrees: Real, time_s: Real, command: int) -> None:
+    def _move_time_write(self, servo_id: int, angle_degrees: Real, time_s: Real, command: int, wait: bool) -> None:
         """
         :param servo_id:
         :param angle_degrees: Should be in the range [0, 240] degrees; will be truncated if outside this range.
         :param time_s: Should be in the range [0, 30] seconds; will be truncated if outside this range.
+        :param wait: Whether or not to wait time_s seconds after sending the command.
         :param command: Acceptable values are _SERVO_MOVE_TIME_WRITE, or _SERVO_MOVE_TIME_WAIT_WRITE.
         """
 
@@ -239,16 +240,20 @@ class Xarm:
         params = _2_UNSIGNED_SHORTS_STRUCT.pack(angle, time_ms)
         self._send_packet(servo_id, command, params)
 
-    def move_time_write(self, servo_id: int, angle_degrees: Real, time_s: Real) -> None:
+        if wait:
+            time.sleep(time_s)
+
+    def move_time_write(self, servo_id: int, angle_degrees: Real, time_s: Real, wait: bool = False) -> None:
         """
         Tells the servo to start moving to the specified angle within the specified amount of time.
 
         :param servo_id:
         :param angle_degrees: Should be in the range [0, 240] degrees; will be truncated if outside this range.
         :param time_s: Should be in the range [0, 30] s; will be truncated if outside this range.
+        :param wait: Whether or not to wait time_s seconds after sending the command.
         """
 
-        return self._move_time_write(servo_id, angle_degrees, time_s, command=_SERVO_MOVE_TIME_WRITE)
+        return self._move_time_write(servo_id, angle_degrees, time_s, _SERVO_MOVE_TIME_WRITE, wait)
 
     def move_time_wait_write(self, servo_id: int, angle_degrees: Real, time_s: Real) -> None:
         """
@@ -259,7 +264,7 @@ class Xarm:
         :param time_s: Should be in the range [0, 30] s; will be truncated if outside this range.
         """
 
-        return self._move_time_write(servo_id, angle_degrees, time_s, command=_SERVO_MOVE_TIME_WAIT_WRITE)
+        return self._move_time_write(servo_id, angle_degrees, time_s, _SERVO_MOVE_TIME_WAIT_WRITE, False)
 
     def _move_time_read(self, servo_id: int, command: int) -> Tuple[float, float]:
         """
@@ -302,20 +307,21 @@ class Xarm:
 
         return self._move_time_read(servo_id, command=_SERVO_MOVE_TIME_WAIT_READ)
 
-    def move_speed_write(self, servo_id: int, angle_degrees: Real, speed_dps: Real) -> None:
+    def move_speed_write(self, servo_id: int, angle_degrees: Real, speed_dps: Real, wait: bool = False) -> None:
         """
         Tells the servo to go to the specified angle at a certain speed.
 
         :param servo_id:
         :param angle_degrees: Should be in the range [0, 240] degrees; will be truncated if outside this range.
         :param speed_dps: The speed in degrees-per-second that the servo should move to the target.
+        :param wait: Whether or not to wait until the move is complete.
         """
 
         current_angle = self.pos_read(servo_id)
         error = abs(angle_degrees - current_angle)
         time_s = error / speed_dps
 
-        self.move_time_write(servo_id, angle_degrees, time_s)
+        self.move_time_write(servo_id, angle_degrees, time_s, wait=wait)
 
     def velocity_read(self, *servo_ids: int, period_s: Real = 0.1) -> List[float]:
         """
@@ -781,10 +787,7 @@ def main() -> int:
     with Xarm() as arm:
         # Control the arm?
         if choice == 'c':
-            try:
-                control(arm)
-            except KeyboardInterrupt:
-                print()
+            control(arm)
             return 0
 
         # Test the arm?
