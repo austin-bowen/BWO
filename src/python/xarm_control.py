@@ -8,7 +8,7 @@ running the code in xarm_control.ino, which acts as a serial to half-duplex UART
 import struct
 import time
 from multiprocessing import RLock
-from typing import Union, NamedTuple, Literal, Tuple, List
+from typing import Union, NamedTuple, Literal, Tuple, List, Optional
 
 import serial
 import serial.tools.list_ports
@@ -31,6 +31,7 @@ SERVO_IDS = (GRIPPER_ID, WRIST_ID, OUTER_ELBOW_ID, INNER_ELBOW_ID, SHOULDER_ID, 
 _PACKET_HEADER = b'\x55\x55'
 _1_SIGNED_CHAR_STRUCT = struct.Struct('<b')
 _1_SIGNED_SHORT_STRUCT = struct.Struct('<h')
+_1_UNSIGNED_CHAR_1_UNSIGNED_SHORT_STRUCT = struct.Struct('<bxh')
 _2_UNSIGNED_SHORTS_STRUCT = struct.Struct('<HH')
 
 # Servo command numbers
@@ -217,8 +218,6 @@ class Xarm:
 
     def _move_time_write(self, servo_id: int, angle_degrees: Real, time_s: Real, command: int) -> None:
         """
-        TODO: This.
-
         :param servo_id:
         :param angle_degrees: Should be in the range [0, 240] degrees; will be truncated if outside this range.
         :param time_s: Should be in the range [0, 30] seconds; will be truncated if outside this range.
@@ -562,20 +561,54 @@ class Xarm:
 
         return _ticks_to_degrees(angle)
 
-    def mode_write(self, servo_id: int, mode: Literal['motor', 'servo']) -> None:
+    def mode_write(self, servo_id: int, mode: Literal['motor', 'servo'], speed: Real = None) -> None:
         """
+        Sets the servo mode to either 'motor' -- where it rotates continuously at a certain speed --
+        or 'servo' -- where it holds to a specific position.
 
         :param servo_id:
-        :param mode:
-        :return:
+        :param mode: Either 'motor' or 'servo'. If 'motor', then speed must be specified.
+        :param speed: In the range [-1000, 1000]. Will be truncated if out of range. Ignored if mode is 'servo'.
         """
 
-        # TODO: This.
-        ...
+        if mode.lower() not in {'motor', 'servo'}:
+            raise ValueError(f'mode must be either "motor" or "servo"; got "{mode}".')
 
-    def mode_read(self, servo_id: int) -> Literal['motor', 'servo']:
-        # TODO: This.
-        ...
+        mode = mode.lower()
+        if mode == 'motor':
+            if speed is None:
+                raise ValueError(f'speed must be specified if mode is "motor".')
+
+            speed = int(round(speed))
+            speed = min(max(-1000, speed), 1000)
+        else:
+            speed = 0
+
+        params = _1_UNSIGNED_CHAR_1_UNSIGNED_SHORT_STRUCT.pack(1 if mode == 'motor' else 0, speed)
+        self._send_packet(servo_id, _SERVO_OR_MOTOR_MODE_WRITE, params)
+
+    def mode_read(self, servo_id: int) -> Tuple[str, Optional[int]]:
+        """
+        Gets the mode the servo is currently set to, based on the last call to mode_write().
+
+        :param servo_id:
+        :return: A tuple of ('motor' or 'servo', speed or None).
+        """
+
+        response = self._send_and_receive_packet(servo_id, _SERVO_OR_MOTOR_MODE_READ)
+
+        mode, speed = _1_UNSIGNED_CHAR_1_UNSIGNED_SHORT_STRUCT.unpack(response.parameters)
+
+        if mode == 0:
+            mode = 'servo'
+            speed = None
+        elif mode == 1:
+            mode = 'motor'
+            speed = int(speed)
+        else:
+            raise XarmException(f'Received unknown mode: {mode}')
+
+        return mode, speed
 
     def set_powered(self, servo_id: int, powered: bool) -> None:
         """Sets whether or not the servo is powered and attempting to hold its position."""
