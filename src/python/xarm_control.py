@@ -93,7 +93,7 @@ class Xarm:
     def __init__(
             self,
             serial_port_regexp: str = r'/dev/ttyACM\d+',
-            timeout: float = None,
+            timeout: float = 1.0,
             on_enter_power_on: bool = False,
             on_exit_power_off: bool = True,
             verify_checksum: bool = True
@@ -199,7 +199,21 @@ class Xarm:
     ) -> _ServoPacket:
         with self._conn_lock:
             self._send_packet(servo_id, command, parameters=parameters)
-            return self._receive_packet()
+            response = self._receive_packet()
+
+        # Make sure received packet servo ID matches
+        if response.servo_id != servo_id:
+            raise XarmException(
+                f'Received packet servo ID ({response.servo_id}) does not match sent packet servo ID ({servo_id}).'
+            )
+
+        # Make sure received packet command matches
+        if response.command != command:
+            raise XarmException(
+                f'Received packet command ({response.command}) does not match sent packet command ({command}).'
+            )
+
+        return response
 
     def _move_time_write(self, servo_id: int, angle_degrees: Real, time_s: Real, command: int) -> None:
         """
