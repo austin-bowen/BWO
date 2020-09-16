@@ -1,4 +1,5 @@
 """
+TODO: This.
 """
 
 import struct
@@ -63,6 +64,7 @@ _SERVO_LED_ERROR_READ = 36
 Real = Union[float, int]
 
 
+# TODO: This could be removed with some refactoring
 class _ServoPacket(NamedTuple):
     servo_id: int
     length: int
@@ -80,6 +82,16 @@ class Xarm:
             on_exit_power_off: bool = True,
             verify_checksum: bool = True
     ) -> None:
+        """
+        TODO: This.
+
+        :param serial_port_regexp:
+        :param timeout:
+        :param on_enter_power_on:
+        :param on_exit_power_off:
+        :param verify_checksum:
+        """
+
         try:
             port_info = next(serial.tools.list_ports.grep(serial_port_regexp))
         except StopIteration:
@@ -201,31 +213,31 @@ class Xarm:
 
     def move_time_write(self, servo_id: int, angle_degrees: Real, time_s: Real) -> None:
         """
+        Tells the servo to start moving to the specified angle within the specified amount of time.
+
         :param servo_id:
         :param angle_degrees: Should be in the range [0, 240] degrees; will be truncated if outside this range.
         :param time_s: Should be in the range [0, 30] s; will be truncated if outside this range.
-        :return:
         """
 
         return self._move_time_write(servo_id, angle_degrees, time_s, command=_SERVO_MOVE_TIME_WRITE)
 
     def move_time_wait_write(self, servo_id: int, angle_degrees: Real, time_s: Real) -> None:
         """
+        Just like move_time_write(), except the servo will not start moving until move_start() is called.
+
         :param servo_id:
         :param angle_degrees: Should be in the range [0, 240] degrees; will be truncated if outside this range.
         :param time_s: Should be in the range [0, 30] s; will be truncated if outside this range.
-        :return:
         """
 
         return self._move_time_write(servo_id, angle_degrees, time_s, command=_SERVO_MOVE_TIME_WAIT_WRITE)
 
     def _move_time_read(self, servo_id: int, command: int) -> Tuple[float, float]:
         """
-        TODO: This docstring.
-        TODO: Test.
         :param servo_id:
         :param command: Either _SERVO_MOVE_TIME_READ or _SERVO_MOVE_TIME_WAIT_READ.
-        :return: (angle_degrees, time_s)
+        :return: A tuple of (angle_degrees, time_s).
         """
 
         if command not in {_SERVO_MOVE_TIME_READ, _SERVO_MOVE_TIME_WAIT_READ}:
@@ -243,9 +255,23 @@ class Xarm:
         return angle_degrees, time_s
 
     def move_time_read(self, servo_id: int) -> Tuple[float, float]:
+        """
+        Returns the parameters set by the last call to move_time_write().
+
+        :param servo_id:
+        :return: A tuple of (angle_degrees, time_s).
+        """
+
         return self._move_time_read(servo_id, command=_SERVO_MOVE_TIME_READ)
 
     def move_time_wait_read(self, servo_id: int) -> Tuple[float, float]:
+        """
+        Returns the parameters set by the last call to move_time_wait_write().
+
+        :param servo_id:
+        :return: A tuple of (angle_degrees, time_s).
+        """
+
         return self._move_time_read(servo_id, command=_SERVO_MOVE_TIME_WAIT_READ)
 
     def move_speed_write(self, servo_id: int, angle_degrees: Real, speed_dps: Real) -> None:
@@ -265,6 +291,8 @@ class Xarm:
 
     def velocity_read(self, *servo_ids: int, period_s: Real = 0.1) -> List[float]:
         """
+        Determines the servo's current velocity by taking two position measurements period_s seconds apart.
+
         :param servo_ids: One or more servo IDs.
         :param period_s: The observation period -- how long to wait between position measurements.
         :return: The current velocity of the servo in degrees per second (may be negative).
@@ -283,12 +311,16 @@ class Xarm:
         return velocities
 
     def move_start(self, servo_id: int) -> None:
+        """Tells the servo to start the motion specified by the last call to move_time_wait_write()."""
         self._send_packet(servo_id, _SERVO_MOVE_START)
 
     def move_stop(self, servo_id: int) -> None:
+        """Stop the servo at whatever its current angle is."""
         self._send_packet(servo_id, _SERVO_MOVE_STOP)
 
     def id_write(self, old_id: int, new_id: int) -> None:
+        """Give the specified servo a new ID."""
+
         if new_id < 0 or new_id > 253:
             raise ValueError(f'new_id must be in range [0, 253]; got {new_id}.')
 
@@ -298,12 +330,10 @@ class Xarm:
         """
         Sets the servo's angle offset.
 
-        TODO: Test.
-
         :param servo_id:
         :param offset_degrees: Servo angle offset, in the range [-30, +30] degrees.
-        :param write: If True, then angle_offset_write(servo_id) will be called after the offset adjustment has been
-            made. Otherwise, the offset adjustment will be lost after the servo loses power.
+        :param write: If True, then angle_offset_write(servo_id) will be called after the offset adjustment
+            has been made. Otherwise, the offset adjustment will be lost after the servo loses power.
         """
 
         if offset_degrees < -30 or offset_degrees > 30:
@@ -320,8 +350,6 @@ class Xarm:
         """
         Saves the offset adjust value set by angle_offset_adjust()
         so that it will persist after the servo loses power.
-
-        TODO: Test.
         """
 
         self._send_packet(servo_id, _SERVO_ANGLE_OFFSET_WRITE)
@@ -339,8 +367,6 @@ class Xarm:
         """
         Sets the minimum and maximum servo angles allowed.
         This setting will persist after the servo loses power.
-
-        TODO: Test.
 
         :param servo_id:
         :param min_angle_degrees: Minimum servo angle, in the range [0, 240] degrees. Will be truncated if out of range.
@@ -367,7 +393,8 @@ class Xarm:
 
     def angle_limit_read(self, servo_id: int) -> Tuple[float, float]:
         """
-        TODO: Test.
+        Gets the angle limits as set by angle_limit_write().
+
         :return: The angle limits as a tuple of (min_angle_degrees, max_angle_degrees).
         """
 
@@ -385,8 +412,6 @@ class Xarm:
         Sets the minimum and maximum supply voltages allowed to power the servo.
         If the supply voltage goes outside the specified range, the servos will be powered off.
         This setting will persist after a servo loses power.
-
-        TODO: Test.
 
         :param servo_id:
         :param min_voltage: Should be in the range [4.5, 12] volts; anything out of range will be truncated.
@@ -415,7 +440,7 @@ class Xarm:
 
     def vin_limit_read(self, servo_id: int) -> Tuple[float, float]:
         """
-        TODO: Test.
+        Gets the input voltage limits as set by vin_limit_write().
 
         :param servo_id:
         :return: A tuple of the (min_voltage, max_voltage) settings in Volts.
@@ -435,8 +460,6 @@ class Xarm:
         If the servo temperature exceeds this limit, then the motor will be powered off.
         This setting persists after a servo loses power.
 
-        TODO: Test.
-
         :param servo_id:
         :param temp: Max allowed temperature. Should be in range [50, 100] C or [122, 212] F.
             Will be truncated if out of range. Default is 85 C or 185 F.
@@ -455,7 +478,7 @@ class Xarm:
 
     def temp_max_limit_read(self, servo_id: int, units: Literal['C', 'F'] = 'F') -> float:
         """
-        TODO: Test.
+        Gets the maximum temperature limit s set by temp_max_limit_write().
 
         :param servo_id:
         :param units: Use 'C' for Celsius or 'F' for Fahrenheit.
@@ -494,19 +517,21 @@ class Xarm:
         return temp
 
     def vin_read(self, servo_id: int) -> float:
-        """Reads the input voltage to the servo."""
+        """Gets the input voltage to the servo."""
 
         response = self._send_and_receive_packet(servo_id, _SERVO_VIN_READ)
 
         vin_mv = _1_SIGNED_SHORT_STRUCT.unpack(response.parameters)[0]
+
         return vin_mv / 1000
 
     def pos_read(self, servo_id: int) -> float:
-        """Reads the servo angle, in degrees. May be negative."""
+        """Gets the servo angle, in degrees. May be negative."""
 
         response = self._send_and_receive_packet(servo_id, _SERVO_POS_READ)
 
         angle = _1_SIGNED_SHORT_STRUCT.unpack(response.parameters)[0]
+
         return _ticks_to_degrees(angle)
 
     def mode_write(self, servo_id: int, mode: Literal['motor', 'servo']) -> None:
@@ -517,31 +542,78 @@ class Xarm:
         :return:
         """
 
+        # TODO: This.
+        ...
+
     def mode_read(self, servo_id: int) -> Literal['motor', 'servo']:
         # TODO: This.
         ...
 
     def set_powered(self, servo_id: int, powered: bool) -> None:
+        """Sets whether or not the servo is powered and attempting to hold its position."""
+
         self._send_packet(servo_id, _SERVO_LOAD_OR_UNLOAD_WRITE, b'\x01' if powered else b'\x00')
 
     def is_powered(self, servo_id: int) -> bool:
+        """Gets whether or not the servo is powered and attempting to hold its position."""
+
         response = self._send_and_receive_packet(servo_id, _SERVO_LOAD_OR_UNLOAD_READ)
         return bool(response.parameters[0])
 
     def led_ctrl_write(self, servo_id: int, state: bool) -> None:
+        """
+        Sets whether or not the LED should be on when there are no errors.
+
+        :param servo_id:
+        :param state: Whether or not the LED should be on when there are no errors.
+        """
+
         self._send_packet(servo_id, _SERVO_LED_CTRL_WRITE, b'\x00' if state else b'\x01')
 
     def led_ctrl_read(self, servo_id: int) -> bool:
-        # TODO: This.
-        ...
+        """
+        Gets whether or not the LED is on when there are no errors.
+
+        :param servo_id:
+        :return: Whether or not the LED is on when there are no errors.
+        """
+
+        response = self._send_and_receive_packet(servo_id, _SERVO_LED_CTRL_READ)
+        return response.parameters == b'\x00'
 
     def led_error_write(self, servo_id: int, stalled: bool, over_voltage: bool, over_temp: bool) -> None:
-        # TODO: This.
-        ...
+        """
+        Sets which error conditions will cause the LED to indicate an error has occurred.
+
+        :param servo_id:
+        :param stalled:
+        :param over_voltage:
+        :param over_temp:
+        """
+
+        params = (stalled << 2) | (over_voltage << 1) | over_temp
+        params = bytes((params,))
+        self._send_packet(servo_id, _SERVO_LED_ERROR_WRITE, params)
 
     def led_error_read(self, servo_id: int) -> Tuple[bool, bool, bool]:
-        # TODO: This.
-        ...
+        """
+        Returns which error conditions will cause the LED to indicate an error has occurred.
+
+        Note: This is NOT the error condition that the servo is currently experiencing.
+        There appears to be no way to get that information.
+
+        :param servo_id:
+        :return: A tuple of booleans (stalled, over_voltage, over_temp).
+        """
+
+        result = self._send_and_receive_packet(servo_id, _SERVO_LED_ERROR_READ)
+        params = result.parameters[0]
+
+        stalled = bool(params & 4)
+        over_voltage = bool(params & 2)
+        over_temp = bool(params & 1)
+
+        return stalled, over_voltage, over_temp
 
 
 class XarmException(Exception):
@@ -614,6 +686,8 @@ def show_velocities(arm: Xarm) -> None:
 
 
 def test(arm: Xarm) -> int:
+    # TODO: This.
+
     errors = 0
 
     def start_test(name: str) -> None:
