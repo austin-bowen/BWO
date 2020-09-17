@@ -231,7 +231,7 @@ class Xarm:
                 f'Command must be either {_SERVO_MOVE_TIME_WRITE} or {_SERVO_MOVE_TIME_WAIT_WRITE}; got {command}.'
             )
 
-        angle_degrees = _truncate_angle(angle_degrees)
+        angle_degrees = truncate_angle(angle_degrees)
         angle = _degrees_to_ticks(angle_degrees)
 
         time_s = min(max(0, time_s), 30)
@@ -409,8 +409,8 @@ class Xarm:
             Must be higher than min_angle_degrees.
         """
 
-        min_angle_degrees = _truncate_angle(min_angle_degrees)
-        max_angle_degrees = _truncate_angle(max_angle_degrees)
+        min_angle_degrees = truncate_angle(min_angle_degrees)
+        max_angle_degrees = truncate_angle(max_angle_degrees)
 
         min_angle = _degrees_to_ticks(min_angle_degrees)
         max_angle = _degrees_to_ticks(max_angle_degrees)
@@ -710,7 +710,7 @@ def _ticks_to_degrees(ticks: int) -> float:
     return ticks * MAX_ANGLE_DEGREES / 1000
 
 
-def _truncate_angle(angle_degrees: Real) -> Real:
+def truncate_angle(angle_degrees: Real) -> Real:
     """:return: The angle, truncated to be in the range [0, 240] degrees."""
 
     return min(max(MIN_ANGLE_DEGREES, angle_degrees), MAX_ANGLE_DEGREES)
@@ -746,11 +746,23 @@ def control(arm: Xarm):
     arm.set_powered(BROADCAST_ID, False)
 
 
-def show_velocities(arm: Xarm) -> None:
-    while True:
-        vs = arm.velocity_read(*SERVO_IDS)
-        vs = [int(round(v)) for v in vs]
-        print('\t'.join(map(str, vs)))
+def watch_arm_state(arm: Xarm) -> None:
+    arm.set_powered(BROADCAST_ID, False)
+
+    try:
+        while True:
+            positions = map(arm.pos_read, SERVO_IDS)
+            positions = [int(round(p)) for p in positions]
+
+            vs = arm.velocity_read(*SERVO_IDS)
+            vs = [int(round(v)) for v in vs]
+
+            print()
+            print('Servo:\t' + '\t'.join(map(str, SERVO_IDS)))
+            print('Pos. :\t' + '\t'.join(map(str, positions)))
+            print('Vel. :\t' + '\t'.join(map(str, vs)))
+    except KeyboardInterrupt:
+        print()
 
 
 def test(arm: Xarm) -> int:
@@ -758,45 +770,103 @@ def test(arm: Xarm) -> int:
 
     errors = 0
 
-    def start_test(name: str) -> None:
-        print(f'Testing {name}... ', end='', flush=True)
+    # pos_read
+    print('\nTesting pos_read and move_time_write...')
+    error = False
+    delta = 20
+    move_time = 1
+    for servo_id in SERVO_IDS:
+        print(f'- Servo {servo_id}:')
 
-    def end_test(success: bool) -> None:
-        print('Pass' if success else 'FAIL!')
+        print(f'  - pos_read({servo_id}) -> ', end='', flush=True)
+        try:
+            degrees = arm.pos_read(servo_id)
+            print(degrees)
+        except Exception as e:
+            print(f'Error: {e}')
+            error = True
+            errors += 1
+            continue
 
-    arm.led_ctrl_write(BROADCAST_ID, False)
-    print(f'temp = {arm.temp_read(2)}')
-    print(f'vin = {arm.vin_read(2)}')
-    arm.move_time_write(2, 90, 1)
-    import time
-    time.sleep(1)
-    arm.move_time_write(2, 180, 10)
-    time.sleep(5)
-    arm.move_stop(2)
-    arm.led_ctrl_write(BROADCAST_ID, True)
+        degrees = truncate_angle(degrees)
+        target = (degrees - delta) if degrees > 120 else (degrees + delta)
 
-    end_test(False)
+        print(f'  - move_time_write({servo_id}, {target}, {move_time}, wait=True) -> ', end='', flush=True)
+        try:
+            print(arm.move_time_write(servo_id, target, move_time, wait=True))
+        except Exception as e:
+            print(f'Error: {e}')
+            error = True
+            errors += 1
+            continue
+
+        print(f'  - pos_read({servo_id}) -> ', end='', flush=True)
+        try:
+            new_degrees = arm.pos_read(servo_id)
+            print(new_degrees)
+        except Exception as e:
+            print(f'Error: {e}')
+            error = True
+            errors += 1
+            continue
+
+        # Arm does not appear to have moved?
+        if abs(degrees - new_degrees) < 1:
+            print(f'  - Error: Servo does not appear to have moved.')
+            error = True
+            errors += 1
+
+        print(f'  - move_time_write({servo_id}, {degrees}, {move_time}, wait=True) -> ', end='', flush=True)
+        try:
+            print(arm.move_time_write(servo_id, degrees, move_time, wait=True))
+        except Exception as e:
+            print(f'Error: {e}')
+            error = True
+            errors += 1
+
+    print('- FAIL' if error else '- Pass')
 
     return errors
 
 
 def main() -> int:
-    # Ask the user if they'd like to control or test the arm
-    choice = input('Would you like to [t]est or [c]ontrol the arm? ').strip().lower()
+    print('Options:')
+    print('1. Test - Run automated tests on the arm')
+    print('2. Control - Use keyboard commands to control the arm')
+    print('3. Watch State - Show various states of the arm in real time')
+    print()
 
-    with Xarm() as arm:
+    try:
+        choice = input('Choice: ')
+    except KeyboardInterrupt:
+        print()
+        return 0
+
+    if not choice:
+        print('No choice given.')
+        return 0
+
+    choice = int(choice.strip())
+
+    print()
+    with Xarm(on_enter_power_on=True) as arm:
+        # Test the arm?
+        if choice == 1:
+            return test(arm)
+
         # Control the arm?
-        if choice == 'c':
+        elif choice == 2:
             control(arm)
             return 0
 
-        # Test the arm?
-        elif choice == 't':
-            return test(arm)
+        # Watch the arm?
+        elif choice == 3:
+            watch_arm_state(arm)
+            return 0
 
         # Invalid choice?
         else:
-            print(f'Invalid choice "{choice}".')
+            print(f'Invalid choice!')
             return 1
 
 
