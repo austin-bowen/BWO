@@ -10,7 +10,8 @@ from queue import Empty
 from threading import Thread
 from time import monotonic
 from traceback import print_last
-from typing import Any, Callable, NamedTuple, List, Union, Type, Optional, Literal
+from typing import Any, Callable, NamedTuple, List, Union, Type, Optional
+from typing_extensions import Literal
 
 _MESSAGE_QUEUE = Queue()
 _SUBSCRIBERS = {}

@@ -3,7 +3,8 @@ import time
 import traceback
 from math import pi
 from threading import Event, RLock, Thread
-from typing import NamedTuple, Union, Optional, Literal, Tuple
+from typing import NamedTuple, Union, Optional, Tuple
+from typing_extensions import Literal
 
 import serial
 
