@@ -1,4 +1,6 @@
+import cv2
 import itertools
+import numpy as np
 import os
 import signal
 import time
@@ -22,6 +24,8 @@ class DriveMotorsNode(Node):
         self._brake = False
         self._brake_changed = Event()
         self._boost = False
+
+        self.subscribe('drive_motors.set_target_velocities', self._handle_set_target_velocities)
 
         self.subscribe('remote_control.right_joystick_x', self._handle_left_joystick_x)
         self.subscribe('remote_control.left_joystick_y', self._handle_left_joystick_y)
@@ -71,6 +75,122 @@ class DriveMotorsNode(Node):
 
     def _handle_right_trigger_pressure(self, message: Message):
         self._boost = message.data >= 0.5
+
+    def _handle_set_target_velocities(self, message: Message) -> None:
+        velocities = message.data
+
+        try:
+            self._target_linear_velocity = velocities['linear']
+        except KeyError:
+            pass
+
+        try:
+            self._target_angular_velocity = velocities['angular']
+        except KeyError:
+            pass
+
+
+class FaceTrackerNode(Node):
+    def __init__(self):
+        super().__init__('Face Tracker', 5, worker_type='thread')
+
+        self.face_detector = cv2.CascadeClassifier(
+                f'/usr/share/OpenCV/haarcascades/'
+                f'haarcascade_frontalface_default.xml')
+
+        self.pan_servo_center = ServosNode._centers[ServosNode.PAN_SERVO]
+        self.pan_servo_position = None
+
+        self.subscribe(
+            f'servos.channel.{ServosNode.PAN_SERVO}.position',
+            self._handle_pan_servo_position_change
+        )
+
+    def loop(self) -> None:
+        error_threshold = 0.05
+
+        # Optimal: 15
+        fps = 15
+
+        self.log('Opening camera...')
+        video = cv2.VideoCapture(2)
+        # Optimal: 848x480
+        # Options: 320x180, 320x240, 424x240, 640x360, 640x480, 960x540, 1280x720, 1920x1080
+        video.set(cv2.CAP_PROP_FRAME_WIDTH, 848)
+        video.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        video.set(cv2.CAP_PROP_FPS, fps)
+        _, image = video.read()
+        if image is None:
+            self.log_error('Failed to open camera.')
+            return
+
+        image_height, image_width, _ = image.shape
+        min_face_size = round(min(image_width, image_height) / 6)
+        min_face_size = (min_face_size, min_face_size)
+        prev_face_center = None
+
+        try:
+            was_tracking = False
+            while not self._stop_flag.wait(timeout=1 / fps):
+                _, image = video.read()
+                gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+                faces = self.face_detector.detectMultiScale(
+                        gray_image, 1.1, 4, minSize=min_face_size)
+
+                faces = sorted(faces, key=lambda face: face[2] * face[3], reverse=True)
+                try:
+                    x, y, w, h = faces[0]
+                except:
+                    if was_tracking:
+                        self.publish(
+                            'drive_motors.set_target_velocities',
+                            {'angular': 0}
+                        )
+
+                    was_tracking = False
+                    continue
+
+                face_center = [x + (w / 2), y + (h / 2)]
+                if prev_face_center is not None:
+                    a = 0.9
+                    face_center[0] = lpf(prev_face_center[0], face_center[0], a)
+                    face_center[1] = lpf(prev_face_center[1], face_center[1], a)
+                face_error = [
+                    (2 * face_center[0] - image_width) / image_width,
+                    (2 * face_center[1] - image_height) / image_height
+                ]
+
+                self.log(f'{image_width}x{image_height}: {face_center} {face_error}')
+
+                if self.pan_servo_position is not None:
+                    offset = self.pan_servo_position - self.pan_servo_center
+                    angular = 0.08 * offset if abs(offset) >= 50 else 0
+                    self.publish(
+                        'drive_motors.set_target_velocities',
+                        {'angular': angular}
+                    )
+
+                if max(np.abs(face_error)) < error_threshold:
+                    continue
+
+                gain = (-150, -70)
+                self.publish(
+                    'servos.increment_targets',
+                    {
+                        ServosNode.PAN_SERVO: gain[0] * face_error[0],
+                        ServosNode.TILT_SERVO: gain[1] * face_error[1]
+                    }
+                )
+
+                prev_face_center = face_center
+                was_tracking = True
+        finally:
+            video.release()
+            self.log('Closed camera.')
+
+    def _handle_pan_servo_position_change(self, message: Message) -> None:
+        self.pan_servo_position = message.data
 
 
 class GamesirNode(Node):
@@ -148,13 +268,19 @@ class GamesirNode(Node):
 
 
 class ServosNode(Node):
+    TILT_SERVO = 0
+    PAN_SERVO = 1
+
+    _centers = {TILT_SERVO: 1450, PAN_SERVO: 1535}
+
     def __init__(self):
         super().__init__('Servos', 5)
 
-        self._centers = {0: 1450, 1: 1535}
         self._targets = dict(self._centers)
         self._targets_changed = Event()
         self._targets_changed.set()
+
+        self.subscribe('servos.increment_targets', self._handle_increment_targets)
 
         self.subscribe('remote_control.right_joystick_x', self._handle_right_joystick_x)
         self.subscribe('remote_control.right_joystick_y', self._handle_right_joystick_y)
@@ -176,8 +302,10 @@ class ServosNode(Node):
 
                 servo_control.set_acceleration(0, 0)
                 servo_control.set_acceleration(1, 0)
-                servo_control.set_speed(0, 50)
-                servo_control.set_speed(1, 50)
+                #servo_control.set_speed(0, 50)
+                #servo_control.set_speed(1, 50)
+                servo_control.set_speed(0, 25)
+                servo_control.set_speed(1, 25)
 
                 while not self._stop_flag.wait(timeout=0.1):
                     if self._targets_changed.is_set():
@@ -186,7 +314,8 @@ class ServosNode(Node):
 
                     for channel in sorted(self._targets.keys()):
                         topic = f'servos.channel.{channel}.position'
-                        data = servo_control.get_position(channel)
+                        #data = servo_control.get_position(channel)
+                        data = self._targets[channel]
                         self.publish(topic, data)
 
                 # Put the head down
@@ -196,6 +325,15 @@ class ServosNode(Node):
                 time.sleep(1)
         finally:
             self.log('Disconnected.')
+
+    def _handle_increment_targets(self, message: Message) -> None:
+        for channel, delta in message.data.items():
+            target = self._targets[channel] + delta
+            center = self._centers[channel]
+            target = min(max(center - 500, target), center + 500)
+            self._targets[channel] = target
+
+        self._targets_changed.set()
 
     def _handle_right_joystick_x(self, message: Message) -> None:
         self._targets[1] = self._centers[1] - 500 * message.data
@@ -284,6 +422,13 @@ class Point:
         return sqrt((other.x - self.x) ** 2 + (other.y - self.y) ** 2)
 
 
+def lpf(current, new, alpha: float) -> float:
+    """
+    :param alpha: Filter constant. 0 ==> current. 1 ==> new.
+    """
+    return (1 - alpha) * current + alpha * new
+
+
 def test_remote_control_nodes():
     def handle_terminate_signal(signum, frame):
         print('Sending stop signal...')
@@ -296,7 +441,8 @@ def test_remote_control_nodes():
     node_runner = NodeRunner([
         GamesirNode(),
         DriveMotorsNode(),
-        ServosNode()
+        ServosNode(),
+        FaceTrackerNode()
     ])
 
     node_runner.print_messages_matching(r'remote_control\.._button')
