@@ -11,6 +11,7 @@ import gamesir
 from drive_motor_control import DriveMotorController, ticks_to_distance, differential_to_unicycle
 from easybot.node import Message, Node, NodeRunner
 from maestro import MicroMaestro
+from object_detection import ObjectDetectionNode
 from orientation import Orientation
 from utils import grep_serial_ports, normalize_angle_degrees
 
@@ -442,7 +443,17 @@ def test_remote_control_nodes():
         GamesirNode(),
         DriveMotorsNode(),
         ServosNode(),
-        FaceTrackerNode()
+        #FaceTrackerNode(),
+        ObjectDetectionNode(
+            video_source_uri='/dev/video2',
+            video_source_args=[
+                '--input-width=848',
+                '--input-height=480',
+                '--input-rate=15'
+            ],
+            log_detections=True,
+            log_fps=True
+        )
     ])
 
     node_runner.print_messages_matching(r'remote_control\.._button')
