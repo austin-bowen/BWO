@@ -40,28 +40,46 @@ class ObjectDetectionNode(Node):
             log_fps: bool = False
     ) -> None:
         """
+        Object detection node.
+
+        Publishes on topic 'detected_objects', with data set to a list of
+        Detection instances.
+
+        For reference, the Intel Realsense D435i supports these settings:
+        - RGB camera:
+          - Resolutions: 320x180, 320x240, 424x240, 640x360, 640x480, 848x480*, 960x540, 1280x720, 1920x1080.
+          - FPS: 6, 15*, 30, 60.
+
+        * These are optimal settings.
+
         :param video_source_args: Includes '--input-width', '--input-height',
             and '--input-rate'.
         """
 
-        super().__init__('Object Detection', 5)
+        super().__init__('Object Detection', 5, worker_type='process')
 
         self.video_source_uri = video_source_uri
         self.video_source_args = video_source_args
+        self.network_name = network
+        self.threshold = threshold
         self.logging_args = [f'--log-level={log_level}']
         self.log_detections = log_detections
         self.log_fps = log_fps
 
         # Initialize the detection network
-        self.net = jetson.inference.detectNet(
-            network,
-            self.logging_args,
-            threshold
-        )
+        self.net = None
 
         self.class_id_to_desc = {}
 
     def loop(self) -> None:
+        # Initialize the detection network
+        if self.net is None:
+            self.net = jetson.inference.detectNet(
+                self.network_name,
+                self.logging_args,
+                self.threshold
+            )
+
         # Build video source args
         video_source_args = self.video_source_args
         if not video_source_args:
@@ -82,17 +100,14 @@ class ObjectDetectionNode(Node):
                 # Get the next image
                 image = video_source.Capture()
 
-                # Detect objects in the image
-                detections = self.net.Detect(image, overlay='none')
-
-                class_descs = {}
-                for detection in detections:
+                # Detect objects in the image and iterate over each one
+                detections = []
+                for d in self.net.Detect(image, overlay='none'):
                     # Get the class description, e.g. 'person', 'cat'
-                    class_desc = self.get_class_desc(detection.ClassID)
+                    class_desc = self.get_class_desc(d.ClassID)
 
                     # Convert from jetson Detection to our Detection
-                    d = detection
-                    detection = Detection(
+                    detections.append(Detection(
                         d.ClassID,
                         class_desc,
                         d.Confidence,
@@ -106,29 +121,14 @@ class ObjectDetectionNode(Node):
                         d.Width,
                         video_width,
                         video_height
-                    )
-                    del d
+                    ))
 
-                    # Publish the detection
-                    self.publish(
-                        'detected_object',
-                        {'class_desc': class_desc, 'detection': detection}
-                    )
-
-                    # Keep track of how many of each class there have been
-                    try:
-                        class_descs[class_desc] += 1
-                    except KeyError:
-                        class_descs[class_desc] = 1
+                # Publish the detections
+                self.publish('detected_objects', detections)
 
                 # Log the detections
                 if self.log_detections:
-                    class_descs = [
-                        f'{class_descs[desc]} {desc}'
-                        for desc in sorted(class_descs.keys())
-                    ]
-
-                    self.log('Detected: ' + ', '.join(class_descs))
+                    self.log('Detected: ' + 'TODO: This.')
 
                 # Log the detection FPS
                 if self.log_fps:
