@@ -1,15 +1,14 @@
-import cv2
 import itertools
-import numpy as np
 import os
 import signal
 import time
 from math import atan2, sqrt, pi
 from multiprocessing import Event
+from threading import Event as ThreadingEvent
 
 import gamesir
 from drive_motor_control import DriveMotorController, ticks_to_distance, differential_to_unicycle
-from easybot.node import Message, Node, NodeRunner
+from easybot.node import Message, Node, NodeRunner, get_timestamp
 from maestro import MicroMaestro
 from object_detection import ObjectDetectionNode
 from orientation import Orientation
@@ -26,7 +25,13 @@ class DriveMotorsNode(Node):
         self._brake_changed = Event()
         self._boost = False
 
-        self.subscribe('drive_motors.set_target_velocities', self._handle_set_target_velocities)
+        # The data should be a dictionary like:
+        #   {'linear': <cm/s>, 'angular': <deg/s>}
+        # Each key is optional.
+        self.subscribe(
+            'drive_motors.set_target_velocities',
+            self._handle_set_target_velocities
+        )
 
         self.subscribe('remote_control.right_joystick_x', self._handle_left_joystick_x)
         self.subscribe('remote_control.left_joystick_y', self._handle_left_joystick_y)
@@ -46,6 +51,8 @@ class DriveMotorsNode(Node):
         try:
             with DriveMotorController(controller_serial_port=serial_port.device) as drive_motors:
                 self.log('Connected.')
+
+                drive_motors.set_acceleration(2000)
 
                 while not self._stop_flag.wait(timeout=0.1):
                     if self._brake_changed.is_set():
@@ -92,15 +99,27 @@ class DriveMotorsNode(Node):
 
 
 class FaceTrackerNode(Node):
-    def __init__(self):
-        super().__init__('Face Tracker', 5, worker_type='thread')
+    """
+    TODO: Rename this etc. to something like "TargetTrackerNode".
+    """
 
-        self.face_detector = cv2.CascadeClassifier(
-                f'/usr/share/OpenCV/haarcascades/'
-                f'haarcascade_frontalface_default.xml')
+    TRACKING_PERSISTENCE_TIME = 0.5
+
+    def __init__(self):
+        super().__init__('Face Tracker', 5)
+
+        self.person = None
+        self.target_timestamp = None
 
         self.pan_servo_center = ServosNode._centers[ServosNode.PAN_SERVO]
         self.pan_servo_position = None
+
+        self._updated_person = ThreadingEvent()
+
+        self.subscribe(
+            'detected_objects',
+            self._handle_detected_objects
+        )
 
         self.subscribe(
             f'servos.channel.{ServosNode.PAN_SERVO}.position',
@@ -110,72 +129,48 @@ class FaceTrackerNode(Node):
     def loop(self) -> None:
         error_threshold = 0.05
 
-        # Optimal: 15
-        fps = 15
+        was_tracking = False
+        while not self._stop_flag.is_set():
+            if not self._updated_person.wait(timeout=1):
+                continue
+            self._updated_person.clear()
 
-        self.log('Opening camera...')
-        video = cv2.VideoCapture(2)
-        # Optimal: 848x480
-        # Options: 320x180, 320x240, 424x240, 640x360, 640x480, 960x540, 1280x720, 1920x1080
-        video.set(cv2.CAP_PROP_FRAME_WIDTH, 848)
-        video.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        video.set(cv2.CAP_PROP_FPS, fps)
-        _, image = video.read()
-        if image is None:
-            self.log_error('Failed to open camera.')
-            return
+            person = self.person
 
-        image_height, image_width, _ = image.shape
-        min_face_size = round(min(image_width, image_height) / 6)
-        min_face_size = (min_face_size, min_face_size)
-        prev_face_center = None
-
-        try:
-            was_tracking = False
-            while not self._stop_flag.wait(timeout=1 / fps):
-                _, image = video.read()
-                gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-                faces = self.face_detector.detectMultiScale(
-                        gray_image, 1.1, 4, minSize=min_face_size)
-
-                faces = sorted(faces, key=lambda face: face[2] * face[3], reverse=True)
-                try:
-                    x, y, w, h = faces[0]
-                except:
-                    if was_tracking:
-                        self.publish(
-                            'drive_motors.set_target_velocities',
-                            {'angular': 0}
-                        )
-
+            if not person:
+                if was_tracking:
                     was_tracking = False
-                    continue
-
-                face_center = [x + (w / 2), y + (h / 2)]
-                if prev_face_center is not None:
-                    a = 0.9
-                    face_center[0] = lpf(prev_face_center[0], face_center[0], a)
-                    face_center[1] = lpf(prev_face_center[1], face_center[1], a)
-                face_error = [
-                    (2 * face_center[0] - image_width) / image_width,
-                    (2 * face_center[1] - image_height) / image_height
-                ]
-
-                self.log(f'{image_width}x{image_height}: {face_center} {face_error}')
-
-                if self.pan_servo_position is not None:
-                    offset = self.pan_servo_position - self.pan_servo_center
-                    angular = 0.08 * offset if abs(offset) >= 50 else 0
                     self.publish(
                         'drive_motors.set_target_velocities',
-                        {'angular': angular}
+                        {'linear': 0, 'angular': 0}
                     )
 
-                if max(np.abs(face_error)) < error_threshold:
-                    continue
+                continue
 
-                gain = (-150, -70)
+            # Calculate the face center
+            if person.class_desc == 'person':
+                # TODO: WHY doesn't SUBTRACTING from the top work??
+                face_center = [
+                    person.center[0],
+                    #person.top - round(0.1 * person.height)
+                    person.top + 50
+                ]
+            else:
+                face_center = person.center
+
+            # Calculate the error
+            image_width, image_height = person.image_width, person.image_height
+            face_error = [
+                (2 * face_center[0] - image_width) / image_width,
+                (2 * face_center[1] - image_height) / image_height
+            ]
+
+            self.log(f'{image_width}x{image_height}: {face_center} {face_error}')
+
+            # Only move the camera if one of the errors exceeds the threshold
+            max_error = max(abs(e) for e in face_error)
+            if max_error >= error_threshold:
+                gain = (-50, -40)
                 self.publish(
                     'servos.increment_targets',
                     {
@@ -184,11 +179,52 @@ class FaceTrackerNode(Node):
                     }
                 )
 
-                prev_face_center = face_center
-                was_tracking = True
-        finally:
-            video.release()
-            self.log('Closed camera.')
+            # Turn the body if the camera is pointed too far to either side
+            target_velocities = {}
+            if self.pan_servo_position is not None:
+                offset = self.pan_servo_position - self.pan_servo_center
+                angular = 0.08 * offset if abs(offset) >= 50 else 0
+                target_velocities['angular'] = angular
+
+            # Drive towards the target if it takes up less than a certain
+            # percentage of the total image width
+            error = (image_width - (1 / 0.4) * person.width) / image_width
+            if error > 0:
+                target_velocities['linear'] = min(max(0, 50 * error), 40)
+            elif error < -0.2:
+                target_velocities['linear'] = min(max(-15, 50 * error), 0)
+            else:
+                target_velocities['linear'] = 0
+
+            if target_velocities:
+                self.publish(
+                    'drive_motors.set_target_velocities',
+                    target_velocities
+                )
+
+            was_tracking = True
+
+    def _handle_detected_objects(self, message: Message) -> None:
+        detections = message.data
+
+        targets = filter(lambda d: d.class_desc in {'cat', 'person'}, detections)
+        targets = sorted(targets, key=lambda t: t.area, reverse=True)
+
+        prev_target = self.person
+
+        try:
+            self.person = targets[0]
+            self.target_timestamp = message.timestamp
+        except IndexError:
+            # How long has it been since the previous target was seen?
+            if self.person:
+                time_last_seen = get_timestamp() - self.target_timestamp
+                if time_last_seen > self.TRACKING_PERSISTENCE_TIME:
+                    self.person = None
+                else:
+                    self.log('Cannot see target but pretending I can')
+
+        self._updated_person.set()
 
     def _handle_pan_servo_position_change(self, message: Message) -> None:
         self.pan_servo_position = message.data
@@ -202,7 +238,7 @@ class GamesirNode(Node):
         self.log('Searching for Gamesir controller...')
         controllers = gamesir.get_controllers()
         if not controllers:
-            print('Failed to find Gamesir controller.')
+            self.log('Failed to find Gamesir controller.')
             return
 
         self.log('Connecting...')
@@ -443,7 +479,7 @@ def test_remote_control_nodes():
         GamesirNode(),
         DriveMotorsNode(),
         ServosNode(),
-        #FaceTrackerNode(),
+        FaceTrackerNode(),
         ObjectDetectionNode(
             video_source_uri='/dev/video2',
             video_source_args=[
@@ -451,8 +487,8 @@ def test_remote_control_nodes():
                 '--input-height=480',
                 '--input-rate=15'
             ],
-            log_detections=True,
-            log_fps=True
+            log_detections=False,
+            log_fps=False
         )
     ])
 
