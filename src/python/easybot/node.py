@@ -3,6 +3,7 @@ TODO: This.
 """
 
 import re
+import signal
 import traceback
 from abc import ABC
 from multiprocessing import Event, Process, Queue
@@ -49,7 +50,7 @@ class Node(ABC):
     def run(self) -> None:
         if self.loop_period is not None and self.loop_period > 0:
             while True:
-                t0 = monotonic()
+                t0 = get_timestamp()
 
                 try:
                     self.loop()
@@ -58,7 +59,7 @@ class Node(ABC):
                     for line in traceback.format_exc().splitlines():
                         self.log_error(line)
 
-                elapsed = monotonic() - t0
+                elapsed = get_timestamp() - t0
 
                 timeout = self.loop_period - elapsed
                 if timeout <= 0:
@@ -97,7 +98,7 @@ class Node(ABC):
 
     @staticmethod
     def publish(topic: str, data: Any = None) -> None:
-        _MESSAGE_QUEUE.put(Message(topic, data, monotonic()))
+        _MESSAGE_QUEUE.put(Message(topic, data, get_timestamp()))
 
     @staticmethod
     def subscribe(topic: str, handler: Callable[[Message], None]) -> None:
@@ -108,12 +109,22 @@ class Node(ABC):
         else:
             _SUBSCRIBERS[topic] = [handler]
 
+    @staticmethod
+    def handlers(topic: str) -> List[Callable[[Message], None]]:
+        """
+        Returns a list of handlers to the given topic,
+        or an empty list if there are none.
+        """
+
+        return _SUBSCRIBERS.get(topic, [])
+
 
 class NodeRunner:
     def __init__(self, nodes: List[Node] = None):
         self.nodes = nodes if nodes else []
 
         self._print_message_patterns = []
+        self._stop_flag = Event()
 
     def add_node(self, node: Node) -> None:
         self.nodes.append(node)
@@ -122,6 +133,9 @@ class NodeRunner:
         self._print_message_patterns.append(re.compile(topic_pattern))
 
     def run(self) -> None:
+        signal.signal(signal.SIGINT, self._handle_stop_signal)
+        signal.signal(signal.SIGTERM, self._handle_stop_signal)
+
         try:
             # Start all the nodes
             for node in self.nodes:
@@ -129,7 +143,8 @@ class NodeRunner:
 
             # Handle the messages pushed to the queue until the stop message is published,
             # or all nodes are no longer alive for some reason.
-            while True:
+            avg_latency = 0
+            while not self._stop_flag.is_set():
                 # Get the next message
                 try:
                     message = _MESSAGE_QUEUE.get(block=True, timeout=2)
@@ -150,6 +165,21 @@ class NodeRunner:
                     handlers = _SUBSCRIBERS[message.topic]
                 except KeyError:
                     continue
+
+                '''
+                latency = get_timestamp() - message.timestamp
+                a = 0.01
+                avg_latency = a * latency + (1 - a) * avg_latency
+                print(f'Latency: {round(latency * 1000):3} ms / {round(avg_latency * 1000):3} ms avg.')
+                if 0 and latency > 0.1:
+                    print(f'Dropping message: {message}')
+                    try:
+                        while True:
+                            _MESSAGE_QUEUE.get(block=False)
+                    except Empty:
+                        pass
+                    continue
+                '''
 
                 # Pass the message to all the handlers
                 for handler in handlers:
@@ -172,16 +202,18 @@ class NodeRunner:
             for node in stopping_nodes:
                 node.join(timeout=10)
 
+            # This prevents a non-empty queue from preventing shutdown
+            _MESSAGE_QUEUE.cancel_join_thread()
+
+    def _handle_stop_signal(self, signal_number, stack_frame):
+        self._stop_flag.set()
+
+
+def get_timestamp() -> float:
+    return monotonic()
+
 
 def main():
-    import signal
-
-    def publish_stop_message(signal_number, stack_frame):
-        Node.publish('easybot.stop', None)
-
-    signal.signal(signal.SIGINT, publish_stop_message)
-    signal.signal(signal.SIGTERM, publish_stop_message)
-
     class TestNode(Node):
         def __init__(self, name: str, loop_period: Optional[float],
                      worker_class: Type[Union[Thread, Process]] = Thread):
