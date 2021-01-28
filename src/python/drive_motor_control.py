@@ -7,6 +7,7 @@ from typing import NamedTuple, Union, Optional, Tuple
 from typing_extensions import Literal
 
 import serial
+import serialpackets
 
 # Wheel constants
 ENCODER_PPR = 2912
@@ -42,19 +43,17 @@ class DriveMotorController(Thread):
     Properties:
       ``state_change_callbacks`` -- A set of functions that will be called each time a new DriveMotorState is created.
       The function must take arguments of type ``(DriveMotorController, DriveMotorState)``.
-
     """
 
-    _ACK = b'\xAA'
     _SET_VELOCITY_COMMAND = b'\xC0'
-    _SET_VELOCITY_RECV_STRUCT = struct.Struct('<chh')
-    _SET_VELOCITY_SEND_STRUCT = struct.Struct('<lhlhc')
+    _SET_VELOCITY_SEND_STRUCT = struct.Struct('<chh')
+    _SET_VELOCITY_RECV_STRUCT = struct.Struct('<lhlhc')
     _SET_PID_TUNINGS_COMMAND = b'\xC1'
-    _SET_PID_TUNINGS_RECV_STRUCT = struct.Struct('<cfff')
+    _SET_PID_TUNINGS_SEND_STRUCT = struct.Struct('<cfff')
     _SET_ACCELERATION_COMMAND = b'\xC2'
-    _SET_ACCELERATION_RECV_STRUCT = struct.Struct('<cH')
+    _SET_ACCELERATION_SEND_STRUCT = struct.Struct('<cH')
     _SET_BRAKE_COMMAND = b'\xC3'
-    _SET_BRAKE_RECV_STRUCT = struct.Struct('<c?')
+    _SET_BRAKE_SEND_STRUCT = struct.Struct('<c?')
 
     def __init__(
             self,
@@ -66,7 +65,7 @@ class DriveMotorController(Thread):
         super().__init__(name='DriveMotorControllerThread', daemon=True)
 
         self._conn = serial.Serial(port=controller_serial_port, baudrate=baudrate, timeout=timeout)
-        serial.Serial()
+        self._packets = serialpackets.SerialPackets(self._conn)
         self._lock = RLock()
         self._set_velocity_resend_period = set_velocity_resend_period
         self._stop_event = Event()
@@ -90,9 +89,7 @@ class DriveMotorController(Thread):
             self.stop_motors()
         finally:
             self.join()
-
-            with self._lock:
-                self._conn.close()
+            self._conn.close()
 
     def get_drive_motor_state(self) -> DriveMotorState:
         return self._send_set_velocity_command()
@@ -115,22 +112,13 @@ class DriveMotorController(Thread):
         if acceleration < 0:
             raise ValueError(f'Acceleration must be >= 0. Given acceleration: {acceleration}')
 
-        with self._lock:
-            # Send the bytes for the "set acceleration" command
-            self._conn.write(self._SET_ACCELERATION_RECV_STRUCT.pack(self._SET_ACCELERATION_COMMAND, acceleration))
-            self._conn.flush()
-
-            # Receive the response, hopefully it's an ACK
-            self._recv_ack()
+        # Send the bytes for the "set acceleration" command
+        self._send_command(
+            self._SET_ACCELERATION_SEND_STRUCT.pack(self._SET_ACCELERATION_COMMAND, acceleration))
 
     def set_brake(self, brake: bool) -> None:
-        with self._lock:
-            # Send the bytes for the "Set Brake" command
-            self._conn.write(self._SET_BRAKE_RECV_STRUCT.pack(self._SET_BRAKE_COMMAND, brake))
-            self._conn.flush()
-
-            # Receive the response, hopefully it's an ACK
-            self._recv_ack()
+        # Send the bytes for the "Set Brake" command
+        self._send_command(self._SET_BRAKE_SEND_STRUCT.pack(self._SET_BRAKE_COMMAND, brake))
 
     def set_pid_tunings(self, p: float = 0.05, i: float = 0.5, d: float = 0.0) -> None:
         """
@@ -141,13 +129,8 @@ class DriveMotorController(Thread):
         if p < 0 or i < 0 or d < 0:
             raise ValueError(f'All tunings must be non-negative. Given tunings: p={p}, i={i}, d={d}')
 
-        with self._lock:
-            # Send the bytes for the "set PID tunings" command
-            self._conn.write(self._SET_PID_TUNINGS_RECV_STRUCT.pack(self._SET_PID_TUNINGS_COMMAND, p, i, d))
-            self._conn.flush()
-
-            # Receive the response, hopefully it's an ACK
-            self._recv_ack()
+        # Send the bytes for the "set PID tunings" command
+        self._send_command(self._SET_PID_TUNINGS_SEND_STRUCT.pack(self._SET_PID_TUNINGS_COMMAND, p, i, d))
 
     def set_velocity_differential(
             self,
@@ -158,9 +141,7 @@ class DriveMotorController(Thread):
         if distance_unit == 'cm':
             left_motor_velocity = distance_to_ticks(left_motor_velocity)
             right_motor_velocity = distance_to_ticks(right_motor_velocity)
-        elif distance_unit == 'ticks':
-            pass
-        else:
+        elif distance_unit != 'ticks':
             raise ValueError(f'Unrecognized distance_unit "{distance_unit}".')
 
         with self._lock:
@@ -186,29 +167,50 @@ class DriveMotorController(Thread):
     def stop_motors(self) -> DriveMotorState:
         return self.set_velocity_differential(0, 0)
 
-    def _recv_ack(self) -> None:
-        with self._lock:
-            response = self._conn.read()
-            if response != self._ACK:
-                raise DriveMotorException('Did not receive ACK from the controller!')
+    def _send_command(self, data: bytes) -> bytes:
+        """
+        Sends the command data, receives a response packet, makes sure the 0th byte of the response is an ACK (i.e.
+        that it matches the 0th byte of the data, which is the command byte), and then returns the part of the response
+        that comes after the ACK (0th) byte.
+        :param data: The command data to send.
+        :return: The response bytes, after the ACK (0th) byte.
+        :raises DriveMotorException: if timed out waiting to receive an ACK from the controller, or received ACK was not
+            the expected value.
+        """
+
+        if not data:
+            raise ValueError('data must be given')
+
+        response = self._packets.write_then_read_packet(data)
+        expected_ack = data[0:1]
+
+        if response is None:
+            raise DriveMotorException('Timed out waiting to receive ACK from the controller.')
+
+        received_ack = response[0:1]
+        if received_ack != expected_ack:
+            raise DriveMotorException(
+                f'Did not receive expected ACK from the controller; '
+                f'expected: {expected_ack}; received: {received_ack}.'
+            )
+
+        return response[1:]
 
     def _send_set_velocity_command(self) -> DriveMotorState:
-        with self._lock:
-            # Send the bytes for the "set velocity" command
-            self._conn.write(self._SET_VELOCITY_RECV_STRUCT.pack(
-                self._SET_VELOCITY_COMMAND,
-                int(round(self.target_left_motor_velocity)),
-                int(round(self.target_right_motor_velocity))
-            ))
-            self._conn.flush()
+        # Send the bytes for the "set velocity" command
+        t0 = time.monotonic()
+        response = self._send_command(self._SET_VELOCITY_SEND_STRUCT.pack(
+            self._SET_VELOCITY_COMMAND,
+            int(round(self.target_left_motor_velocity)),
+            int(round(self.target_right_motor_velocity))
+        ))
 
-            # Grab the current time and receive the response byte (either ACK or NCK)
-            timestamp = time.monotonic()
-            self._recv_ack()
+        # Grab the current time
+        timestamp = time.monotonic()
 
-            # Receive and unpack the response bytes
-            left_motor_position, left_motor_velocity, right_motor_position, right_motor_velocity, bumpers = \
-                self._SET_VELOCITY_SEND_STRUCT.unpack(self._conn.read(self._SET_VELOCITY_SEND_STRUCT.size))
+        # Unpack the response bytes
+        left_motor_position, left_motor_velocity, right_motor_position, right_motor_velocity, bumpers = \
+            self._SET_VELOCITY_RECV_STRUCT.unpack(response)
 
         # Interpret the bumpers byte
         bumpers = bumpers[0]
