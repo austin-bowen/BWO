@@ -8,6 +8,7 @@
 
 
 #include <PID_saltyhash.h>
+#include <SerialPackets.h>
 #include "wiring_analog_extras.h"
 
 
@@ -33,24 +34,12 @@
 typedef signed long ticks_t;
 
 union {
-  float value;
+  float float_value;
+  long long_value;
+  short short_value;
+  unsigned short unsigned_short_value;
   byte bytes[4];
-} float_byte_array;
-
-union {
-  long value;
-  byte bytes[4];
-} long_byte_array;
-
-union {
-  short value;
-  byte bytes[2];
-} short_byte_array;
-
-union {
-  unsigned short value;
-  byte bytes[2];
-} unsigned_short_byte_array;
+} values_to_bytes;
 
 
 volatile ticks_t _right_motor_ticks = 0;
@@ -220,9 +209,13 @@ class Motor {
 Motor  left_motor( LEFT_MOTOR_PWM_PIN,  LEFT_MOTOR_DIR_PIN,  &_left_motor_ticks);
 Motor right_motor(RIGHT_MOTOR_PWM_PIN, RIGHT_MOTOR_DIR_PIN, &_right_motor_ticks);
 
+SerialPackets serial_packets;
+const uint8_t packet_buffer_len = 63 - SerialPackets::kPacketHeaderLen;
+uint8_t packet_buffer[packet_buffer_len];
+
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(2000000);
 
   setup_bumpers();
   setup_motors();
@@ -337,11 +330,12 @@ void process_command() {
   left_motor.SetTargetVelocity(left_motor_velocity);
   right_motor.SetTargetVelocity(right_motor_velocity);
 
-  if (!Serial.available()) {
+  int packet_len = serial_packets.ReadNonblocking(packet_buffer, packet_buffer_len);
+  if (packet_len < 1) {
     return;
   }
 
-  const byte command = Serial.peek();
+  const byte command = packet_buffer[0];
 
   /* "Set Velocity" command structure:
    * - Recv: 5 bytes total
@@ -349,7 +343,7 @@ void process_command() {
    *   - left_motor_velocity : signed short (ticks / s)
    *   - right_motor_velocity: signed short (ticks / s)
    * - Send: 14 bytes total
-   *   - ACK: byte = 0xAA
+   *   - command: byte = 0xC0
    *   - actual_left_motor_position : signed long  (ticks)
    *   - actual_left_motor_velocity : signed short (ticks / s)
    *   - actual_right_motor_position: signed long  (ticks)
@@ -357,16 +351,14 @@ void process_command() {
    *   - bumpers: byte (bit 2: left bumper; bit 1: middle bumper; bit 0: right bumper)
    */
   if (command == SET_VELOCITY_COMMAND) {
-    // Skip if there are not enough bytes available in the read/write buffers
-    if (Serial.available() < 5 || Serial.availableForWrite() < 14) {
+    // Skip if the packet is not the right size
+    if (packet_len != 5) {
       return;
     }
 
-    Serial.read();  // Discard the command
-
     // Read the target motor velocities
-    left_motor_velocity  = Serial_ReadShortBytes();
-    right_motor_velocity = Serial_ReadShortBytes();
+    left_motor_velocity = GetShortFromBuffer(packet_buffer, 1);
+    right_motor_velocity = GetShortFromBuffer(packet_buffer, 3);
 
     // Get actual motor and bumper states
     const long   actual_left_motor_position =  left_motor.GetActualPosition();
@@ -375,13 +367,14 @@ void process_command() {
     const short actual_right_motor_velocity = right_motor.GetActualVelocity();
     const byte bumpers = left_bumper << 2 | middle_bumper << 1 | right_bumper;
 
-    // Send the ACK and states
-    Serial.write(ACK);
-    Serial_WriteLongBytes( actual_left_motor_position);
-    Serial_WriteShortBytes(actual_left_motor_velocity);
-    Serial_WriteLongBytes( actual_right_motor_position);
-    Serial_WriteShortBytes(actual_right_motor_velocity);
-    Serial.write(bumpers);
+    // Send the states
+    packet_len = 1;
+    packet_len += CopyLongToBuffer(actual_left_motor_position, packet_buffer, packet_len);
+    packet_len += CopyShortToBuffer(actual_left_motor_velocity, packet_buffer, packet_len);
+    packet_len += CopyLongToBuffer(actual_right_motor_position, packet_buffer, packet_len);
+    packet_len += CopyShortToBuffer(actual_right_motor_velocity, packet_buffer, packet_len);
+    packet_buffer[packet_len++] = bumpers;
+    serial_packets.Write(packet_buffer, packet_len);
 
     last_command_time = millis();
   }
@@ -393,27 +386,26 @@ void process_command() {
    *   - i: float
    *   - d: float
    * - Send: 1 byte total
-   *   - ACK: byte = 0xAA
+   *   - command: byte = 0xC1
    */
   else if (command == SET_PID_TUNINGS_COMMAND) {
-    if (Serial.available() < 13 || Serial.availableForWrite() < 1) {
+    // Skip if the packet is not the right size
+    if (packet_len != 13) {
       return;
     }
 
-    // Discard the command
-    Serial.read();
-
     // Get the new PID tunings
-    const float new_p = Serial_ReadFloatBytes();
-    const float new_i = Serial_ReadFloatBytes();
-    const float new_d = Serial_ReadFloatBytes();
+    const float new_p = GetFloatFromBuffer(packet_buffer, 1 + 0);
+    const float new_i = GetFloatFromBuffer(packet_buffer, 1 + 4);
+    const float new_d = GetFloatFromBuffer(packet_buffer, 1 + 8);
 
     // Set the new PID tunings
     left_motor.SetPidTunings(new_p, new_i, new_d);
     right_motor.SetPidTunings(new_p, new_i, new_d);
 
     // All is well
-    Serial.write(ACK);
+    packet_len = 1;
+    serial_packets.Write(packet_buffer, packet_len);
   }
 
   /* "Set Acceleration" command structure:
@@ -421,21 +413,20 @@ void process_command() {
    *   - command: byte = 0xC2
    *   - acceleration: unsigned short (ticks / s^2)
    * - Send: 1 byte total
-   *   - ACK: byte = 0xAA
+   *   - command: byte = 0xC2
    */
   else if (command == SET_ACCELERATION_COMMAND) {
-    if (Serial.available() < 3 || Serial.availableForWrite() < 1) {
+    // Skip if the packet is not the right size
+    if (packet_len != 3) {
       return;
     }
 
-    // Discard the command
-    Serial.read();
-
     // Read and set the new acceleration
-    left_motor.acceleration = right_motor.acceleration = Serial_ReadUnsignedShortBytes();
+    left_motor.acceleration = right_motor.acceleration = GetUnsignedShortFromBuffer(packet_buffer, 1);
 
     // All is well
-    Serial.write(ACK);
+    packet_len = 1;
+    serial_packets.Write(packet_buffer, packet_len);
   }
 
   /* "Set Brake" command structure:
@@ -443,81 +434,67 @@ void process_command() {
    *   - command: byte = 0xC3
    *   - brake  : boolean
    * - Send: 1 byte total
-   *   - ACK: byte = 0xAA
+   *   - command: byte = 0xC3
    */
   else if (command == SET_BRAKE_COMMAND) {
-    if (Serial.available() < 2 || Serial.availableForWrite() < 1) {
+    // Skip if the packet is not the right size
+    if (packet_len != 2) {
       return;
     }
 
-    // Discard the command
-    Serial.read();
-
-    left_motor.brake = right_motor.brake = Serial.read();
+    left_motor.brake = right_motor.brake = packet_buffer[1];
 
     // All is well
-    Serial.write(ACK);
+    packet_len = 1;
+    serial_packets.Write(packet_buffer, packet_len);
   }
 
   else {
-    // Unknown command!
-    Serial.read();
-    Serial.write(NCK);
+    // Unknown command! Send the inverse of the command.
+    packet_buffer[0] = ~command;
+    serial_packets.Write(packet_buffer, 1);
   }
 }
 
 
-float Serial_ReadFloatBytes() {
-  float_byte_array.bytes[0] = Serial.read();
-  float_byte_array.bytes[1] = Serial.read();
-  float_byte_array.bytes[2] = Serial.read();
-  float_byte_array.bytes[3] = Serial.read();
-
-  return float_byte_array.value;
+size_t CopyValueBytesToBuffer(uint8_t buffer[], const size_t offset, const size_t length) {
+  memcpy(buffer + offset, values_to_bytes.bytes, length);
+  return length;
 }
 
 
-short Serial_ReadShortBytes() {
-  short_byte_array.bytes[0] = Serial.read();
-  short_byte_array.bytes[1] = Serial.read();
-
-  return short_byte_array.value;
+void CopyValueBytesFromBuffer(uint8_t buffer[], const size_t offset, const size_t length) {
+  memcpy(values_to_bytes.bytes, buffer + offset, length);
 }
 
 
-unsigned short Serial_ReadUnsignedShortBytes() {
-  unsigned_short_byte_array.bytes[0] = Serial.read();
-  unsigned_short_byte_array.bytes[1] = Serial.read();
-
-  return unsigned_short_byte_array.value;
+size_t CopyLongToBuffer(const long value, uint8_t buffer[], size_t offset) {
+  values_to_bytes.long_value = value;
+  return CopyValueBytesToBuffer(buffer, offset, 4);
 }
 
 
-void Serial_WriteFloatBytes(const float value) {
-  float_byte_array.value = value;
-
-  Serial.write(float_byte_array.bytes[0]);
-  Serial.write(float_byte_array.bytes[1]);
-  Serial.write(float_byte_array.bytes[2]);
-  Serial.write(float_byte_array.bytes[3]);
+size_t CopyShortToBuffer(const short value, uint8_t buffer[], size_t offset) {
+  values_to_bytes.short_value = value;
+  return CopyValueBytesToBuffer(buffer, offset, 4);
 }
 
 
-void Serial_WriteLongBytes(const long value) {
-  long_byte_array.value = value;
-
-  Serial.write(long_byte_array.bytes[0]);
-  Serial.write(long_byte_array.bytes[1]);
-  Serial.write(long_byte_array.bytes[2]);
-  Serial.write(long_byte_array.bytes[3]);
+float GetFloatFromBuffer(uint8_t buffer[], size_t offset) {
+  CopyValueBytesFromBuffer(buffer, offset, 4);
+  return values_to_bytes.float_value;
 }
 
 
-void Serial_WriteShortBytes(const short value) {
-  short_byte_array.value = value;
+short GetShortFromBuffer(uint8_t buffer[], size_t offset) {
+  CopyValueBytesFromBuffer(buffer, offset, 2);
+  return values_to_bytes.short_value;
+}
 
-  Serial.write(short_byte_array.bytes[0]);
-  Serial.write(short_byte_array.bytes[1]);
+
+unsigned short GetUnsignedShortFromBuffer(uint8_t buffer[], size_t offset) {
+  CopyValueBytesFromBuffer(buffer, offset, 2);
+  return values_to_bytes.unsigned_short_value;
 }
 
 
