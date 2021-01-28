@@ -181,7 +181,7 @@ class DriveMotorController(Thread):
         if not data:
             raise ValueError('data must be given')
 
-        response = self._packets.write_then_read_packet(data)
+        response = self._packets.write_then_read(data)
         expected_ack = data[0:1]
 
         if response is None:
@@ -198,7 +198,6 @@ class DriveMotorController(Thread):
 
     def _send_set_velocity_command(self) -> DriveMotorState:
         # Send the bytes for the "set velocity" command
-        t0 = time.monotonic()
         response = self._send_command(self._SET_VELOCITY_SEND_STRUCT.pack(
             self._SET_VELOCITY_COMMAND,
             int(round(self.target_left_motor_velocity)),
