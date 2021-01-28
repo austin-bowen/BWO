@@ -476,7 +476,7 @@ size_t CopyLongToBuffer(const long value, uint8_t buffer[], size_t offset) {
 
 size_t CopyShortToBuffer(const short value, uint8_t buffer[], size_t offset) {
   values_to_bytes.short_value = value;
-  return CopyValueBytesToBuffer(buffer, offset, 4);
+  return CopyValueBytesToBuffer(buffer, offset, 2);
 }
 
 
