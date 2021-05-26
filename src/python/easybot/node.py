@@ -106,8 +106,9 @@ class Node(ABC):
         self._worker.join(timeout=timeout)
 
     def log(self, message: str, *args, message_type: str = 'INFO', **kwargs):
-        if message_type == 'INFO':
-            return
+        # TODO: Should really use the logging library...
+        #if message_type == 'INFO':
+        #    return
 
         print(f'[{message_type}] [{self}] {message}', *args, **kwargs)
 
