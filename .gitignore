@@ -110,3 +110,4 @@ venv.bak/
 
 # Custom
 pycotts.py
+pyvenv.cfg
