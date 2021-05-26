@@ -1,8 +1,9 @@
+from collections import Counter
 from typing import List, NamedTuple, Tuple
 from typing_extensions import Literal
 
-import jetson.inference
-import jetson.utils
+#import jetson.inference
+#import jetson.utils
 
 from easybot.node import Message, Node
 
@@ -71,14 +72,20 @@ class ObjectDetectionNode(Node):
 
         self.class_id_to_desc = {}
 
-    def loop(self) -> None:
+    def setup(self) -> None:
+        import jetson.inference
+
         # Initialize the detection network
-        if self.net is None:
-            self.net = jetson.inference.detectNet(
-                self.network_name,
-                self.logging_args,
-                self.threshold
-            )
+        self.log('Initializing detection network...')
+        self.net = jetson.inference.detectNet(
+            self.network_name,
+            self.logging_args,
+            self.threshold
+        )
+        self.log('Initialized detection network.')
+
+    def loop(self) -> None:
+        import jetson.utils
 
         # Build video source args
         video_source_args = self.video_source_args
@@ -99,6 +106,9 @@ class ObjectDetectionNode(Node):
             while not self._stop_flag.is_set():
                 # Get the next image
                 image = video_source.Capture()
+                if not image:
+                    self.log_error('Did not receive an image from the camera!')
+                    return
 
                 # Detect objects in the image and iterate over each one
                 detections = []
@@ -127,8 +137,11 @@ class ObjectDetectionNode(Node):
                 self.publish('detected_objects', detections)
 
                 # Log the detections
-                if self.log_detections:
-                    self.log('Detected: ' + 'TODO: This.')
+                if self.log_detections and detections:
+                    counter = Counter(d.class_desc for d in detections)
+                    self.log('Detected: ' + ', '.join(
+                        f'{counter[elem]} {elem}' for elem in sorted(counter))
+                    )
 
                 # Log the detection FPS
                 if self.log_fps:
@@ -138,7 +151,11 @@ class ObjectDetectionNode(Node):
                 if not video_source.IsStreaming():
                     break
         finally:
+            self.log('Closing video source.')
             video_source.Close()
+
+    def cleanup(self) -> None:
+        self.net = None
 
     def get_class_desc(self, class_id: int) -> str:
         try:

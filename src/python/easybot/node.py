@@ -23,6 +23,10 @@ class Message(NamedTuple):
     data: Any
     timestamp: float
 
+    def is_stale(self, max_age: float) -> bool:
+        age = get_timestamp() - self.timestamp
+        return age > max_age
+
 
 class Node(ABC):
     def __init__(self, name: str, loop_period: Optional[float], worker_type: Literal['process', 'thread'] = 'thread'):
@@ -41,36 +45,50 @@ class Node(ABC):
         self._worker = worker_class(target=self.run, name=name, daemon=True)
 
     def __str__(self) -> str:
-        return f'Node "{self.name}"'
+        return self.name
 
     def start(self) -> None:
         self.log('Starting...')
         self._worker.start()
 
     def run(self) -> None:
-        if self.loop_period is not None and self.loop_period > 0:
-            while True:
-                t0 = get_timestamp()
+        # Run setup method, if there is one
+        setup = getattr(self, 'setup', None)
+        if callable(setup):
+            self.log('Setting up...')
+            setup()
+            self.log('Set up.')
 
-                try:
+        try:
+            if self.loop_period is not None and self.loop_period > 0:
+                while True:
+                    t0 = get_timestamp()
+
+                    try:
+                        self.loop()
+                    except Exception:
+                        self.log_error(f'Exception occurred while running loop:')
+                        for line in traceback.format_exc().splitlines():
+                            self.log_error(line)
+
+                    elapsed = get_timestamp() - t0
+
+                    timeout = self.loop_period - elapsed
+                    if timeout <= 0:
+                        self.log_warning(
+                            f'loop() took {elapsed}s to run, which is longer than the loop period of {self.loop_period}s!')
+
+                    if self._stop_flag.wait(timeout=timeout):
+                        break
+            else:
+                while not self._stop_flag.is_set():
                     self.loop()
-                except Exception:
-                    self.log_error(f'Exception occurred while running loop():')
-                    for line in traceback.format_exc().splitlines():
-                        self.log_error(line)
-
-                elapsed = get_timestamp() - t0
-
-                timeout = self.loop_period - elapsed
-                if timeout <= 0:
-                    self.log_warning(
-                        f'loop() took {elapsed}s to run, which is longer than the loop period of {self.loop_period}s!')
-
-                if self._stop_flag.wait(timeout=timeout):
-                    break
-        else:
-            while not self._stop_flag.is_set():
-                self.loop()
+        finally:
+            cleanup = getattr(self, 'cleanup', None)
+            if callable(cleanup):
+                self.log('Cleaning up...')
+                cleanup()
+                self.log('Cleaned up.')
 
         self.log('Stopped.')
 
@@ -88,7 +106,10 @@ class Node(ABC):
         self._worker.join(timeout=timeout)
 
     def log(self, message: str, *args, message_type: str = 'INFO', **kwargs):
-        print(f'[{message_type}] {self}: {message}', *args, **kwargs)
+        if message_type == 'INFO':
+            return
+
+        print(f'[{message_type}] [{self}] {message}', *args, **kwargs)
 
     def log_error(self, message: str, *args, **kwargs):
         self.log(message, *args, message_type='ERROR', **kwargs)
@@ -120,6 +141,8 @@ class Node(ABC):
 
 
 class NodeRunner:
+    LATENCY_WARNING_THRESHOLD = 0.5
+
     def __init__(self, nodes: List[Node] = None):
         self.nodes = nodes if nodes else []
 
@@ -166,20 +189,12 @@ class NodeRunner:
                 except KeyError:
                     continue
 
-                '''
                 latency = get_timestamp() - message.timestamp
                 a = 0.01
-                avg_latency = a * latency + (1 - a) * avg_latency
-                print(f'Latency: {round(latency * 1000):3} ms / {round(avg_latency * 1000):3} ms avg.')
-                if 0 and latency > 0.1:
-                    print(f'Dropping message: {message}')
-                    try:
-                        while True:
-                            _MESSAGE_QUEUE.get(block=False)
-                    except Empty:
-                        pass
-                    continue
-                '''
+                #avg_latency = a * latency + (1 - a) * avg_latency
+                #print(f'Latency: {round(latency * 1000):3} ms / {round(avg_latency * 1000):3} ms avg.')
+                if 1 and latency > self.LATENCY_WARNING_THRESHOLD:
+                    print(f'[WARN] Message latency is {latency}s')
 
                 # Pass the message to all the handlers
                 for handler in handlers:

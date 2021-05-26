@@ -10,12 +10,16 @@ import gamesir
 from drive_motor_control import DriveMotorController, ticks_to_distance, differential_to_unicycle
 from easybot.node import Message, Node, NodeRunner, get_timestamp
 from maestro import MicroMaestro
+from main_node import MainNode
 from object_detection import ObjectDetectionNode
 from orientation import Orientation
+from tts_node import TTSNode
 from utils import grep_serial_ports, normalize_angle_degrees
 
 
 class DriveMotorsNode(Node):
+    MAX_MESSAGE_LATENCY = 0.2
+
     def __init__(self):
         super().__init__('Drive Motors', 5)
 
@@ -49,7 +53,10 @@ class DriveMotorsNode(Node):
 
         self.log('Connecting...')
         try:
-            with DriveMotorController(controller_serial_port=serial_port.device) as drive_motors:
+            with DriveMotorController(
+                    controller_serial_port=serial_port.device,
+                    set_velocity_resend_period=None
+            ) as drive_motors:
                 self.log('Connected.')
 
                 drive_motors.set_acceleration(2000)
@@ -85,6 +92,13 @@ class DriveMotorsNode(Node):
         self._boost = message.data >= 0.5
 
     def _handle_set_target_velocities(self, message: Message) -> None:
+        # Stop motors if message is stale
+        if message.is_stale(self.MAX_MESSAGE_LATENCY):
+            self.log_warning('Received stale message; stopping motors.')
+            self._target_linear_velocity = 0
+            self._target_angular_velocity = 0
+            return
+
         velocities = message.data
 
         try:
@@ -103,6 +117,13 @@ class FaceTrackerNode(Node):
     TODO: Rename this etc. to something like "TargetTrackerNode".
     """
 
+    # Pairs of (class, min confidence) in priority order
+    TRACKED_CLASSES = (
+        ('sports ball', 0.0),
+        ('cat'        , 0.0),
+        ('person'     , 0.5)
+    )
+
     TRACKING_PERSISTENCE_TIME = 0.5
 
     def __init__(self):
@@ -111,7 +132,7 @@ class FaceTrackerNode(Node):
         self.person = None
         self.target_timestamp = None
 
-        self.pan_servo_center = ServosNode._centers[ServosNode.PAN_SERVO]
+        self.pan_servo_center = ServosNode.POSITIONS[ServosNode.PAN_SERVO][1]
         self.pan_servo_position = None
 
         self._updated_person = ThreadingEvent()
@@ -140,6 +161,8 @@ class FaceTrackerNode(Node):
             if not person:
                 if was_tracking:
                     was_tracking = False
+
+                    # Stop the drive motors
                     self.publish(
                         'drive_motors.set_target_velocities',
                         {'linear': 0, 'angular': 0}
@@ -190,27 +213,31 @@ class FaceTrackerNode(Node):
             # percentage of the total image width
             error = (image_width - (1 / 0.4) * person.width) / image_width
             if error > 0:
-                target_velocities['linear'] = min(max(0, 50 * error), 40)
+                target_velocities['linear'] = min(max(0, 100 * error), 40)
             elif error < -0.2:
                 target_velocities['linear'] = min(max(-15, 50 * error), 0)
             else:
                 target_velocities['linear'] = 0
 
-            if target_velocities:
-                self.publish(
-                    'drive_motors.set_target_velocities',
-                    target_velocities
-                )
+            self.publish(
+                'drive_motors.set_target_velocities',
+                target_velocities
+            )
 
             was_tracking = True
 
     def _handle_detected_objects(self, message: Message) -> None:
         detections = message.data
 
-        targets = filter(lambda d: d.class_desc in {'cat', 'person'}, detections)
-        targets = sorted(targets, key=lambda t: t.area, reverse=True)
-
-        prev_target = self.person
+        targets = None
+        for class_desc, min_confidence in self.TRACKED_CLASSES:
+            targets = filter(
+                lambda d: d.class_desc == class_desc and d.confidence >= min_confidence,
+                detections
+            )
+            targets = sorted(targets, key=lambda t: t.area, reverse=True)
+            if targets:
+                break
 
         try:
             self.person = targets[0]
@@ -308,21 +335,28 @@ class ServosNode(Node):
     TILT_SERVO = 0
     PAN_SERVO = 1
 
-    _centers = {TILT_SERVO: 1450, PAN_SERVO: 1535}
+    MAX_MESSAGE_LATENCY = 0.2
+
+    # Format: (min, center, max)
+    POSITIONS = {
+        TILT_SERVO: (1450 - 450, 1450, 1450 + 500),
+        PAN_SERVO : (1535 - 300, 1535, 1535 + 300)
+    }
 
     def __init__(self):
         super().__init__('Servos', 5)
 
-        self._targets = dict(self._centers)
+        self._targets = dict(
+            (channel, positions[1]) for channel, positions in self.POSITIONS.items()
+        )
         self._targets_changed = Event()
         self._targets_changed.set()
 
+        self.subscribe('servos.set_targets', self._handle_set_targets)
         self.subscribe('servos.increment_targets', self._handle_increment_targets)
 
         self.subscribe('remote_control.right_joystick_x', self._handle_right_joystick_x)
         self.subscribe('remote_control.right_joystick_y', self._handle_right_joystick_y)
-        self.subscribe('remote_control.x_button', self._handle_x_button)
-        self.subscribe('remote_control.y_button', self._handle_y_button)
 
     def loop(self) -> None:
         self.log('Searching for Maestro...')
@@ -356,89 +390,49 @@ class ServosNode(Node):
                         self.publish(topic, data)
 
                 # Put the head down
-                targets = dict(self._centers)
-                targets[0] -= 500
-                servo_control.set_targets(targets)
-                time.sleep(1)
+                servo_control.set_targets({
+                    self.TILT_SERVO: self.POSITIONS[self.TILT_SERVO][0],
+                    self.PAN_SERVO: self.POSITIONS[self.PAN_SERVO][1]
+                })
+                time.sleep(1.5)
         finally:
             self.log('Disconnected.')
 
+    def _handle_set_targets(self, message: Message) -> None:
+        if message.is_stale(self.MAX_MESSAGE_LATENCY) or not message.data:
+            return
+
+        for channel, target in message.data.items():
+            self._targets[channel] = self.normalize(channel, target)
+
+        self._targets_changed.set()
+
     def _handle_increment_targets(self, message: Message) -> None:
+        if message.is_stale(self.MAX_MESSAGE_LATENCY) or not message.data:
+            return
+
         for channel, delta in message.data.items():
             target = self._targets[channel] + delta
-            center = self._centers[channel]
-            target = min(max(center - 500, target), center + 500)
-            self._targets[channel] = target
+            center = self.POSITIONS[channel][1]
+            self._targets[channel] = self.normalize(channel, target)
 
         self._targets_changed.set()
 
     def _handle_right_joystick_x(self, message: Message) -> None:
-        self._targets[1] = self._centers[1] - 500 * message.data
+        self._targets[1] = self.POSITIONS[self.PAN_SERVO][1] - 500 * message.data
         self._targets_changed.set()
 
     def _handle_right_joystick_y(self, message: Message) -> None:
-        self._targets[0] = self._centers[0] + 500 * message.data
+        self._targets[0] = self.POSITIONS[self.TILT_SERVO][1] + 500 * message.data
         self._targets_changed.set()
 
-    def _handle_x_button(self, message: Message) -> None:
-        if not message.data:
-            return
+    def normalize(self, servo: int, target: int) -> int:
+        try:
+            min_target, _, max_target = self.POSITIONS[servo]
+        except KeyError:
+            return target
 
-        from threading import Thread
-        class ShakeHead(Thread):
-            delta = 200
-
-            def __init__(self, servos, *args, **kwargs):
-                super().__init__(*args, **kwargs)
-                self.servos = servos
-
-            def run(self):
-                center = self.servos._targets[1]
-
-                self.servos._targets[1] = center + self.delta
-                self.servos._targets_changed.set()
-                time.sleep(0.2)
-
-                for target in (-1, 1, -1):
-                    self.servos._targets[1] = center + target * self.delta
-                    self.servos._targets_changed.set()
-                    time.sleep(0.4)
-
-                self.servos._targets[1] = center
-                self.servos._targets_changed.set()
-                time.sleep(0.2)
-
-        ShakeHead(self).start()
-
-    def _handle_y_button(self, message: Message) -> None:
-        if not message.data:
-            return
-
-        from threading import Thread
-        class Nod(Thread):
-            delta = 200
-
-            def __init__(self, servos, *args, **kwargs):
-                super().__init__(*args, **kwargs)
-                self.servos = servos
-
-            def run(self):
-                center = self.servos._targets[0]
-
-                self.servos._targets[0] = center + self.delta
-                self.servos._targets_changed.set()
-                time.sleep(0.2)
-
-                for target in (-1, 1, -1):
-                    self.servos._targets[0] = center + target * self.delta
-                    self.servos._targets_changed.set()
-                    time.sleep(0.4)
-
-                self.servos._targets[0] = center
-                self.servos._targets_changed.set()
-                time.sleep(0.2)
-
-        Nod(self).start()
+        return min(max(min_target, target), max_target)
 
 
 class Point:
@@ -476,23 +470,27 @@ def test_remote_control_nodes():
     signal.signal(signal.SIGTERM, handle_terminate_signal)
 
     node_runner = NodeRunner([
-        GamesirNode(),
+        #GamesirNode(),
         DriveMotorsNode(),
         ServosNode(),
         FaceTrackerNode(),
         ObjectDetectionNode(
             video_source_uri='/dev/video2',
             video_source_args=[
-                '--input-width=848',
-                '--input-height=480',
+                #'--input-width=848',
+                #'--input-height=480',
+                '--input-width=1280',
+                '--input-height=720',
                 '--input-rate=15'
             ],
-            log_detections=False,
-            log_fps=False
-        )
+            log_detections=True,
+            log_fps=True
+        ),
+        TTSNode(),
+        MainNode(),
     ])
 
-    node_runner.print_messages_matching(r'remote_control\.._button')
+    #node_runner.print_messages_matching(r'remote_control\.._button')
 
     node_runner.run()
 
