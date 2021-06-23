@@ -13,15 +13,16 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='austin',
+    maintainer='Austin Bowen',
     maintainer_email='austin.bowen.314@gmail.com',
-    description='TODO: Package description',
-    license='TODO: License declaration',
+    description='ROS2 Foxy package for my robot BWO.',
+    license='The MIT License',
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'object_detector = bwo.object_detector_node:main'
+            'camera = bwo.camera_node:main',
+            'drive_motors = bwo.drive_motor_node:main',
+            'object_detect = bwo.object_detect_node:main'
         ],
     },
 )
-

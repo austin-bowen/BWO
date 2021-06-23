@@ -3,11 +3,14 @@
 <package format="3">
   <name>bwo</name>
   <version>0.0.0</version>
-  <description>ROS2 package for my robot, BWO.</description>
+  <description>ROS2 Foxy package for my robot BWO.</description>
   <maintainer email="austin.bowen.314@gmail.com">Austin Bowen</maintainer>
-  <license>TODO: License declaration</license>
+  <license>The MIT License</license>
 
-  <buildtool_depend>ament_python</buildtool_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>python3-serial</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
