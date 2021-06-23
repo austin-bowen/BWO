@@ -40,23 +40,19 @@ class DriveMotorsNode(Node):
             serial_port = next(grep_serial_ports(
                 r'USB VID:PID=2886:802F SER=46EB557A50533050352E3120FF121E27 LOCATION=.+'))
         except StopIteration:
-            logger.error('Failed to find motor controller.')
-            serial_port = None
+            raise RuntimeError('Failed to find motor controller.')
 
         # Connect to motor controller
-        if serial_port:
-            logger.info('Connecting...')
-            self.drive_motors = DriveMotorController(
-                    controller_serial_port=serial_port.device,
-                    set_velocity_resend_period=None
-            )
-            logger.info('Connected.')
+        logger.info('Connecting...')
+        self.drive_motors = DriveMotorController(
+                controller_serial_port=serial_port.device,
+                set_velocity_resend_period=None
+        )
+        logger.info('Connected.')
 
-            self.drive_motors.set_acceleration(2000)
+        self.drive_motors.set_acceleration(2000)
 
-            self.create_timer(self.TIMER_PERIOD, self.send_motor_commands)
-        else:
-            self.drive_motors = None
+        self.create_timer(self.TIMER_PERIOD, self.send_motor_commands)
 
         # Start listening for the set_velocity command
         self.create_subscription(
@@ -69,8 +65,7 @@ class DriveMotorsNode(Node):
     def destroy_node(self) -> bool:
         result = super().destroy_node()
 
-        if self.drive_motors is not None:
-            self.drive_motors.__exit__(None, None, None)
+        self.drive_motors.__exit__(None, None, None)
 
         return result
 
@@ -98,15 +93,17 @@ class DriveMotorsNode(Node):
         logger.debug(str(state))
 
         #self.publish('drive_motors.state', state)
-        bumper_state = BumperState()
-        bumper_state.left = state.left_bumper
-        bumper_state.center = state.middle_bumper
-        bumper_state.right = state.right_bumper
-        bumper_state.any = bumper_state.left or bumper_state.center or bumper_state.right
-        if bumper_state != self._prev_bumper_state:
-            logger.debug(f'Publishing: {bumper_state}')
-            self._bumpers_changed_publisher.publish(bumper_state)
-            self._prev_bumper_state = bumper_state
+        if self.count_subscribers(self._bumpers_changed_publisher.topic):
+            bumper_state = BumperState()
+            bumper_state.left = state.left_bumper
+            bumper_state.center = state.middle_bumper
+            bumper_state.right = state.right_bumper
+            bumper_state.any = bumper_state.left or bumper_state.center or bumper_state.right
+
+            if bumper_state != self._prev_bumper_state:
+                logger.debug(f'Publishing: {bumper_state}')
+                self._bumpers_changed_publisher.publish(bumper_state)
+                self._prev_bumper_state = bumper_state
 
     def _set_velocity_callback(self, msg) -> None:
         self._last_set_velocity_time = time.monotonic()
