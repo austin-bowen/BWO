@@ -4,11 +4,13 @@ echo Starting BWO!
 
 cd "$(dirname "$0")"
 
-source bin/activate
+# Source ROS stuff
+source ../ros2_foxy/install/setup.bash
+source ./src/ros2/install/setup.bash
 
-cd src/python
+# Setup PYTHONPATH
+SERIAL_PACKETS_LIB=../serial-packets/src/python
+export PYTHONPATH=./src/python:$SERIAL_PACKETS_LIB:$PYTHONPATH
 
-SERIAL_PACKETS_LIB=~/Projects/serial-packets/src/python/
-export PYTHONPATH=$SERIAL_PACKETS_LIB:/usr/lib/python3.6/dist-packages/
-
-exec python -u main.py
+#exec python -u main.py
+ros2 run bwo drive_motors
