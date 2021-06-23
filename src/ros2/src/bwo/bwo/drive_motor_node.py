@@ -1,6 +1,7 @@
 import rclpy
 import time
 
+from bwo_interfaces.msg import BumperState
 from drive_motor_control import DriveMotorController, ticks_to_distance, differential_to_unicycle
 from geometry_msgs.msg import Twist
 from rclpy.logging import LoggingSeverity
@@ -23,10 +24,15 @@ class DriveMotorsNode(Node):
         self._last_set_velocity_time = 0.0
         self._target_linear_velocity = 0.0
         self._target_angular_velocity = 0.0
+        self._prev_bumper_state = None
 
         # Setup logger
         logger = self.get_logger()
         logger.set_level(self.LOGGER_LEVEL)
+        
+        # Setup publishers
+        self._bumpers_changed_publisher = self.create_publisher(
+                BumperState, 'bumpers_changed', 10)
 
         # Find motor controller
         logger.info('Searching for motor controller...')
@@ -92,6 +98,15 @@ class DriveMotorsNode(Node):
         logger.debug(str(state))
 
         #self.publish('drive_motors.state', state)
+        bumper_state = BumperState()
+        bumper_state.left = state.left_bumper
+        bumper_state.center = state.middle_bumper
+        bumper_state.right = state.right_bumper
+        bumper_state.any = bumper_state.left or bumper_state.center or bumper_state.right
+        if bumper_state != self._prev_bumper_state:
+            logger.debug(f'Publishing: {bumper_state}')
+            self._bumpers_changed_publisher.publish(bumper_state)
+            self._prev_bumper_state = bumper_state
 
     def _set_velocity_callback(self, msg) -> None:
         self._last_set_velocity_time = time.monotonic()
