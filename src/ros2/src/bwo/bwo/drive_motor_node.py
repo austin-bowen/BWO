@@ -63,6 +63,8 @@ class DriveMotorsNode(Node):
         )
 
     def destroy_node(self) -> bool:
+        self.get_logger().info('Destroying...')
+
         result = super().destroy_node()
 
         self.drive_motors.__exit__(None, None, None)
@@ -92,7 +94,7 @@ class DriveMotorsNode(Node):
         )
         logger.debug(str(state))
 
-        #self.publish('drive_motors.state', state)
+        # Publish new bumper state if it has changed
         if self.count_subscribers(self._bumpers_changed_publisher.topic):
             bumper_state = BumperState()
             bumper_state.left = state.left_bumper
@@ -116,14 +118,14 @@ def main(args=None) -> None:
 
     node = DriveMotorsNode()
 
+    print(f'Spinning node: {node.get_name()}')
     try:
-        print('Spinning node')
         rclpy.spin(node)
     finally:
-        print('Shutting down')
         node.destroy_node()
         rclpy.shutdown()
 
 
 if __name__ == '__main__':
     main()
+
