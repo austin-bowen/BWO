@@ -19,6 +19,8 @@ endif()
 find_package(rosidl_default_generators REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/BumperState.msg"
+  "msg/ObjectDetection.msg"
+  "msg/ObjectDetections.msg"
 )
 
 # find dependencies

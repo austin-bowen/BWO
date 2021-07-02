@@ -1,0 +1,12 @@
+string class_name
+float32 confidence
+float32[2] center
+float32 top
+float32 bottom
+float32 left
+float32 right
+float32 width
+float32 height
+float32 area
+uint16 image_width
+uint16 image_height
