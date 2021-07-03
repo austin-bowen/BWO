@@ -102,9 +102,11 @@ def main(args=None) -> None:
 
     node = ObjectDetectNode()
 
-    print(f'Spinning node: {node.get_name()}')
+    print(f'[{node.get_name()}] Spinning...')
     try:
         rclpy.spin(node)
+    except KeyboardInterrupt:
+        print(f'[{node.get_name()}] Kill signal received.')
     finally:
         node.destroy_node()
         rclpy.shutdown()

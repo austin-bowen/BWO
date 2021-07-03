@@ -1,7 +1,7 @@
 # Run: source setup.bash
 
 echo Sourcing ROS2...
-source ~/Projects/ros2_foxy/install/setup.bash
+source /opt/ros/dashing/setup.bash
 
 echo Sourcing BWO...
 source ~/Projects/BWO/src/ros2/install/setup.bash
