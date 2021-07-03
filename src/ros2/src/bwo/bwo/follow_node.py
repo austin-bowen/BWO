@@ -40,23 +40,36 @@ class FollowNode(Node):
         detections = detections.detections
         logger = self.get_logger()
 
-        # Pick an object to follow
-        obj = self._pick_object(detections)
-        logger.debug(f'Following: {obj.class_name if obj else "[None]"}')
+        # Pick a target to follow
+        target = self._pick_target(detections)
+        logger.debug(f'Following: {target.class_name if target else "[None]"}')
 
-        # Stop if no object to follow
-        if not obj:
+        # Stop if no target to follow
+        if not target:
             self._set_velocity(0, 0)
             return
 
-        # Get position from center in range [-1, 1],
+        # Get position of target from center in range [-1, 1],
         # where -1 is bottom/left, and 1 is top/right
-        center_dx = 2 * (obj.center[0] / obj.image_width) - 1
-        center_dy = -2 * (obj.center[1] / obj.image_height) + 1
+        center_dx = 2 * (target.center[0] / target.image_width) - 1
+        center_dy = -2 * (target.center[1] / target.image_height) + 1
 
-        self._set_velocity(0, -center_dx * self.MAX_ANGULAR_SPEED)
+        # Drive towards the target if it takes up less than a certain
+        # percentage of the total image width
+        error = (target.image_width - (1 / 0.4) * target.width) / target.image_width
+        if error > 0:
+            linear_velocity = min(max(0, 100 * error), 40)
+        elif error < -0.2:
+            linear_velocity = min(max(-15, 50 * error), 0)
+        else:
+            linear_velocity = 0
 
-    def _pick_object(self, detections: List[ObjectDetection]) -> ObjectDetection:
+        # Turn to center the target
+        angular_velocity = -center_dx * self.MAX_ANGULAR_SPEED
+
+        self._set_velocity(linear_velocity, angular_velocity)
+
+    def _pick_target(self, detections: List[ObjectDetection]) -> ObjectDetection:
         # Return "closest" person
         detections = filter(lambda d: d.class_name == 'person', detections)
         detections = sorted(detections, key=lambda d: d.area)
