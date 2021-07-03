@@ -15,7 +15,7 @@ class ObjectDetectNode(Node):
 
     def __init__(self) -> None:
         super().__init__('object_detect')
-        
+
         self.network_name = 'ssd-mobilenet-v2'
         # One of: 'silent', 'error', 'warning', 'success', 'info', 'verbose', 'debug'
         log_level = 'success'

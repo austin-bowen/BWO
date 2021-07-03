@@ -15,7 +15,7 @@ class DriveMotorsNode(Node):
     NODE_NAME = 'drive_motors'
     SAFE = True
     SAFE_STOP_PERIOD = 1.0
-    TIMER_PERIOD = 0.2
+    TIMER_PERIOD = 0.1
 
     def __init__(self) -> None:
         super().__init__(self.NODE_NAME, namespace=self.NODE_NAME)
@@ -29,7 +29,7 @@ class DriveMotorsNode(Node):
         # Setup logger
         logger = self.get_logger()
         logger.set_level(self.LOGGER_LEVEL)
-        
+
         # Setup publishers
         self._bumpers_changed_publisher = self.create_publisher(
                 BumperState, 'bumpers_changed', 10)
