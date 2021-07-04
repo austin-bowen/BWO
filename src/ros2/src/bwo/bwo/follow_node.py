@@ -1,4 +1,5 @@
 import numpy as np
+import random
 import rclpy
 
 from bwo_interfaces.msg import ObjectDetection, ObjectDetections
@@ -6,6 +7,8 @@ from geometry_msgs.msg import Twist
 from rclpy.logging import LoggingSeverity
 from rclpy.node import Node
 from typing import List
+
+random.seed()
 
 
 class FollowNode(Node):
@@ -20,6 +23,9 @@ class FollowNode(Node):
         # Setup logger
         logger = self.get_logger()
         logger.set_level(self.LOGGER_LEVEL)
+
+        # Setup search variables
+        self._search_direction = None
 
         # Setup publishers
         self._drive_motors_set_velocity_publisher = self.create_publisher(
@@ -45,9 +51,28 @@ class FollowNode(Node):
         logger.debug(f'Following: {target.class_name if target else "[None]"}')
 
         # Stop if no target to follow
-        if not target:
-            self._set_velocity(0, 0)
-            return
+        if target:
+            self._follow_target(target)
+        else:
+            self._search()
+
+    def _pick_target(self, detections: List[ObjectDetection]) -> ObjectDetection:
+        # Return "closest" person
+        detections = filter(lambda d: d.class_name == 'person', detections)
+        detections = sorted(detections, key=lambda d: d.area)
+        return detections[-1] if detections else None
+
+    def _search(self) -> None:
+        if not self._search_direction:
+            self._search_direction = random.choice([-1, 1])
+
+        angular_velocity = 0.33 * self._search_direction * self.MAX_ANGULAR_SPEED
+
+        self._set_velocity(0, angular_velocity)
+
+    def _follow_target(self, target: ObjectDetection) -> None:
+        # Clear search stuff
+        self._search_direction = None
 
         # Get position of target from center in range [-1, 1],
         # where -1 is bottom/left, and 1 is top/right
@@ -56,7 +81,7 @@ class FollowNode(Node):
 
         # Drive towards the target if it takes up less than a certain
         # percentage of the total image width
-        error = (target.image_width - (1 / 0.4) * target.width) / target.image_width
+        error = (target.image_width - (1 / 0.5) * target.width) / target.image_width
         if error > 0:
             linear_velocity = min(max(0, 100 * error), 40)
         elif error < -0.2:
@@ -65,15 +90,9 @@ class FollowNode(Node):
             linear_velocity = 0
 
         # Turn to center the target
-        angular_velocity = -center_dx * self.MAX_ANGULAR_SPEED
+        angular_velocity = -0.4 * center_dx * self.MAX_ANGULAR_SPEED
 
         self._set_velocity(linear_velocity, angular_velocity)
-
-    def _pick_target(self, detections: List[ObjectDetection]) -> ObjectDetection:
-        # Return "closest" person
-        detections = filter(lambda d: d.class_name == 'person', detections)
-        detections = sorted(detections, key=lambda d: d.area)
-        return detections[-1] if detections else None
 
     def _set_velocity(self, linear: float, angular: float) -> None:
         velocity = Twist()
