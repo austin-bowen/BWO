@@ -26,6 +26,7 @@ setup(
         'console_scripts': [
             'drive_motors = bwo.drive_motor_node:main',
             'follow = bwo.follow_node:main',
+            'neck = bwo.neck_node:main',
             'object_detect = bwo.object_detect_node:main'
         ],
     },

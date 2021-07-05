@@ -18,6 +18,10 @@ def generate_launch_description() -> LaunchDescription:
         ),
         Node(
             package='bwo',
+            node_executable='neck',
+        ),
+        Node(
+            package='bwo',
             node_executable='drive_motors',
         ),
     ])

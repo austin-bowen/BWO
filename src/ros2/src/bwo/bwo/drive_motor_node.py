@@ -65,11 +65,10 @@ class DriveMotorsNode(Node):
     def destroy_node(self) -> bool:
         self.get_logger().info('Destroying...')
 
-        result = super().destroy_node()
-
-        self.drive_motors.__exit__(None, None, None)
-
-        return result
+        try:
+            self.drive_motors.__exit__(None, None, None)
+        finally:
+            return super().destroy_node()
 
     def send_motor_commands(self) -> None:
         logger = self.get_logger()
