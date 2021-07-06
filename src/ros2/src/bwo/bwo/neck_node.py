@@ -83,6 +83,7 @@ class NeckNode(Node):
         self.get_logger().info('Destroying...')
 
         try:
+            # Put the head down before closing
             self._servo_control.set_targets({
                 PAN: PAN_CENTER,
                 TILT: TILT_MIN
@@ -106,7 +107,8 @@ class NeckNode(Node):
             target_pan_pos = self._target_pan_pos
             target_tilt_pos = self._target_tilt_pos
 
-            # Put head down a little bit at the more extreme pan angles
+            # Put head down a little bit at the more extreme pan angles so the
+            # top of the camera does not scrape against the top level
             pan_inner_range = 300
             tilt_limit_outer_range = 1800
             if target_tilt_pos > tilt_limit_outer_range and (
