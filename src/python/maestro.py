@@ -287,15 +287,16 @@ class Maestro:
         """
         self._check_channel(channel)
 
-        # If min is defined and target is below, force to min
-        min_target_us = self.min_targets_us[channel]
-        if min_target_us and target_us < min_target_us:
-            target_us = min_target_us
+        if target_us != 0:
+            # If min is defined and target is below, force to min
+            min_target_us = self.get_min(channel)
+            if min_target_us and target_us < min_target_us:
+                target_us = min_target_us
 
-        # If max is defined and target is above, force to max
-        max_target_us = self.max_targets_us[channel]
-        if max_target_us and target_us > max_target_us:
-            target_us = max_target_us
+            # If max is defined and target is above, force to max
+            max_target_us = self.get_max(channel)
+            if max_target_us and target_us > max_target_us:
+                target_us = max_target_us
 
         # Record target value
         self.targets_us[channel] = target_us

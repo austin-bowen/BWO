@@ -51,8 +51,8 @@ class NeckNode(Node):
         logger.info('Connected.')
 
         # Setup Maestro
-        self._servo_control.set_range(PAN, PAN_MIN, PAN_MAX)
-        self._servo_control.set_range(TILT, TILT_MIN, TILT_MAX)
+        #self._servo_control.set_range(PAN, PAN_MIN, PAN_MAX)
+        #self._servo_control.set_range(TILT, TILT_MIN, TILT_MAX)
         self._servo_control.set_speed(PAN, 25)
         self._servo_control.set_speed(TILT, 25)
         self._servo_control.set_acceleration(PAN, 0)
@@ -65,17 +65,30 @@ class NeckNode(Node):
         self.create_timer(self.TIMER_PERIOD, self._send_servo_commands)
 
         # Start listening for the position commands
+        # - Pan servo
         self.create_subscription(
             Int16,
             'neck/pan/set_pos',
             self._pan_set_pos_callback,
             10
         )
-
+        self.create_subscription(
+            Int16,
+            'neck/pan/inc_pos',
+            self._pan_inc_pos_callback,
+            10
+        )
+        # - Tilt servo
         self.create_subscription(
             Int16,
             'neck/tilt/set_pos',
             self._tilt_set_pos_callback,
+            10
+        )
+        self.create_subscription(
+            Int16,
+            'neck/tilt/inc_pos',
+            self._tilt_inc_pos_callback,
             10
         )
 
@@ -93,12 +106,28 @@ class NeckNode(Node):
             return super().destroy_node()
 
     def _pan_set_pos_callback(self, position: Int16) -> None:
-        self._target_pan_pos = position.data
-        self._target_pos_changed.set()
+        if position.data:
+            self._target_pan_pos = min(max(PAN_MIN, position.data), PAN_MAX)
+            self._target_pos_changed.set()
+        else:
+            self._stop_pan_servo()
+
+    def _pan_inc_pos_callback(self, inc: Int16) -> None:
+        position = Int16()
+        position.data = self._target_pan_pos + inc.data
+        self._pan_set_pos_callback(position)
 
     def _tilt_set_pos_callback(self, position: Int16) -> None:
-        self._target_tilt_pos = position.data
-        self._target_pos_changed.set()
+        if position.data:
+            self._target_tilt_pos = min(max(TILT_MIN, position.data), TILT_MAX)
+            self._target_pos_changed.set()
+        else:
+            self._stop_tilt_servo()
+
+    def _tilt_inc_pos_callback(self, inc: Int16) -> None:
+        position = Int16()
+        position.data = self._target_tilt_pos + inc.data
+        self._tilt_set_pos_callback(position)
 
     def _send_servo_commands(self) -> None:
         if self._target_pos_changed.is_set():
@@ -121,6 +150,12 @@ class NeckNode(Node):
                 PAN: target_pan_pos,
                 TILT: target_tilt_pos
             })
+
+    def _stop_pan_servo(self) -> None:
+        self._servo_control.set_target(PAN, 0)
+
+    def _stop_tilt_servo(self) -> None:
+        self._servo_control.set_target(TILT, 0)
 
 
 def main(args=None) -> None:
