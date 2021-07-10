@@ -2,10 +2,12 @@ import numpy as np
 import random
 import rclpy
 
+from .neck_node import PAN_CENTER, PAN_MAX
 from bwo_interfaces.msg import ObjectDetection, ObjectDetections
 from geometry_msgs.msg import Twist
 from rclpy.logging import LoggingSeverity
 from rclpy.node import Node
+from std_msgs.msg import Float32
 from typing import List
 
 random.seed()
@@ -39,6 +41,13 @@ class FollowNode(Node):
             ObjectDetections,
             '/object_detect',
             self._handle_object_detect,
+            1
+        )
+
+        self.create_subscription(
+            Float32,
+            '/neck/pan/pos',
+            self._handle_neck_pan_pos,
             1
         )
 
@@ -100,6 +109,11 @@ class FollowNode(Node):
         velocity.angular.z = float(angular)
 
         self._drive_motors_set_velocity_publisher.publish(velocity)
+
+    def _handle_neck_pan_pos(self, pos: Float32) -> None:
+        # Range: [-1, 1], where 0 is center, -1 is PAN_MIN, and 1 is PAN_MAX
+        d_center = (pos.data - PAN_CENTER) / (PAN_MAX - PAN_CENTER)
+        print(f'd_center = {d_center}')
 
 
 def main(args=None) -> None:
