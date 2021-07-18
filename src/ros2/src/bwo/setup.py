@@ -24,6 +24,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'bounce = bwo.bounce_node:main',
             'drive_motors = bwo.drive_motor_node:main',
             'follow = bwo.follow_node:main',
             'neck = bwo.neck_node:main',
