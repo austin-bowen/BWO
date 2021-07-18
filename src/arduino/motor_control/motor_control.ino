@@ -262,8 +262,26 @@ void setup_motors() {
 
 
 void loop() {
+  updateHeartbeatLed();
   //debug();
   process_command();
+}
+
+
+/* Toggles the builtin LED once per second to show the controller is still running. */
+void updateHeartbeatLed() {
+  static const unsigned long TOGGLE_PERIOD_MS = 1000L;
+  static unsigned long toggle_time_ms = 0L;
+
+  const unsigned long time_ms = millis();
+
+  if (time_ms >= toggle_time_ms) {
+    // Toggle satus LED
+    pinMode(LED_BUILTIN, OUTPUT);
+    digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
+
+    toggle_time_ms = time_ms + TOGGLE_PERIOD_MS;
+  }
 }
 
 
