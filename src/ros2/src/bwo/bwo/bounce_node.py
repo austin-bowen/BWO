@@ -5,7 +5,8 @@ import time
 from bwo_interfaces.msg import BumperState
 from geometry_msgs.msg import Twist
 from rclpy.logging import LoggingSeverity
-from rclpy.node import Node
+#from rclpy.node import Node
+from .node import Node
 
 FORWARD = 'FORWARD'
 REVERSE = 'REVERSE'
@@ -19,15 +20,11 @@ class BounceNode(Node):
     NODE_NAME = 'bounce'
 
     def __init__(self) -> None:
-        super().__init__(self.NODE_NAME, namespace=self.NODE_NAME)
+        super().__init__(self.NODE_NAME, logger_level=self.LOGGER_LEVEL)
 
         # Initialize instance variables
         self._prev_velocity = None
         self._state = None
-
-        # Setup logger
-        logger = self.get_logger()
-        logger.set_level(self.LOGGER_LEVEL)
 
         # Setup publishers
         self._drive_motors_set_velocity_publisher = self.create_publisher(
@@ -36,6 +33,7 @@ class BounceNode(Node):
             1
         )
 
+        # Setup timers
         self.create_timer(0.5, self._send_velocity_command)
 
         # Start listening for the bumpers_changed topic
@@ -49,7 +47,7 @@ class BounceNode(Node):
         return super().destroy_node()
 
     def _handle_bumpers_changed(self, bumpers: BumperState) -> None:
-        if not bumpers.any:
+        if not self.is_enabled or not bumpers.any:
             return
 
         self._reverse()
@@ -102,9 +100,11 @@ class BounceNode(Node):
         self._send_velocity_command(velocity)
 
     def _send_velocity_command(self, velocity=None) -> None:
+        if not self.is_enabled:
+            return
+
         if velocity is None:
             velocity = self._prev_velocity
-            print('prev:', velocity)
 
         if velocity is None:
             return
