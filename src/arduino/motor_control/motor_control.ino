@@ -45,11 +45,6 @@ union {
 volatile ticks_t _right_motor_ticks = 0;
 volatile ticks_t _left_motor_ticks = 0;
 
-// These are automatically updated by ISRs any time the bumper state changes
-volatile boolean   left_bumper = true;  // Assume true until updated
-volatile boolean middle_bumper = true;
-volatile boolean  right_bumper = true;
-
 
 class Motor {
   private:
@@ -159,11 +154,6 @@ class Motor {
         return;
       }
 
-      // If we want to go forward but we can't, set velocity to 0
-      if (velocity > 0 && forward_check_func != nullptr && !(*forward_check_func)()) {
-        velocity = 0;
-      }
-
       // Update the target and actual velocities
       if (acceleration == 0) {
         target_velocity = velocity;
@@ -175,6 +165,12 @@ class Motor {
           target_velocity = velocity;
         }
       }
+
+      // If we want to go forward but we can't, set target velocity to 0
+      if (target_velocity > 0 && forward_check_func != nullptr && !(*forward_check_func)()) {
+        target_velocity = 0.0;
+      }
+
       UpdateActualVelocity();
 
       if (CloseToEqual(target_velocity, 0) && !brake) {
@@ -226,28 +222,6 @@ void setup_bumpers() {
   pinMode(  LEFT_BUMPER_PIN, INPUT_PULLUP);
   pinMode(MIDDLE_BUMPER_PIN, INPUT_PULLUP);
   pinMode( RIGHT_BUMPER_PIN, INPUT_PULLUP);
-
-  left_bumper   = get_bumper(  LEFT_BUMPER_PIN);
-  middle_bumper = get_bumper(MIDDLE_BUMPER_PIN);
-  right_bumper  = get_bumper( RIGHT_BUMPER_PIN);
-
-  attachInterrupt(
-    digitalPinToInterrupt(LEFT_BUMPER_PIN),
-    handle_left_bumper_change,
-    CHANGE
-  );
-
-  attachInterrupt(
-    digitalPinToInterrupt(MIDDLE_BUMPER_PIN),
-    handle_middle_bumper_change,
-    CHANGE
-  );
-
-  attachInterrupt(
-    digitalPinToInterrupt(RIGHT_BUMPER_PIN),
-    handle_right_bumper_change,
-    CHANGE
-  );
 }
 
 
@@ -288,8 +262,26 @@ void setup_motors() {
 
 
 void loop() {
+  updateHeartbeatLed();
   //debug();
   process_command();
+}
+
+
+/* Toggles the builtin LED once per second to show the controller is still running. */
+void updateHeartbeatLed() {
+  static const unsigned long TOGGLE_PERIOD_MS = 1000L;
+  static unsigned long toggle_time_ms = 0L;
+
+  const unsigned long time_ms = millis();
+
+  if (time_ms >= toggle_time_ms) {
+    // Toggle satus LED
+    pinMode(LED_BUILTIN, OUTPUT);
+    digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
+
+    toggle_time_ms = time_ms + TOGGLE_PERIOD_MS;
+  }
 }
 
 
@@ -365,7 +357,7 @@ void process_command() {
     const short  actual_left_motor_velocity =  left_motor.GetActualVelocity();
     const long  actual_right_motor_position = right_motor.GetActualPosition();
     const short actual_right_motor_velocity = right_motor.GetActualVelocity();
-    const byte bumpers = left_bumper << 2 | middle_bumper << 1 | right_bumper;
+    const byte bumpers = get_left_bumper() << 2 | get_middle_bumper() << 1 | get_right_bumper();
 
     // Send the states
     packet_len = 1;
@@ -504,6 +496,40 @@ boolean get_bumper(const int bumper_pin) {
 }
 
 
+/* Returns true if the left bumper is pressed. */
+boolean get_left_bumper() {
+  return get_bumper(LEFT_BUMPER_PIN);
+}
+
+
+/* Returns true if the middle bumper is pressed. */
+boolean get_middle_bumper() {
+  return get_bumper(MIDDLE_BUMPER_PIN);
+}
+
+
+/* Returns true if the right bumper is pressed. */
+boolean get_right_bumper() {
+  return get_bumper(RIGHT_BUMPER_PIN);
+}
+
+
+/* Returns true if the left motor is allowed to move forward,
+ * i.e. the left and middle bumpers are not pressed.
+ */
+bool can_move_left_forward() {
+  return !get_left_bumper() && !get_middle_bumper();
+}
+
+
+/* Returns true if the right motor is allowed to move forward,
+ * i.e. the right and middle bumpers are not pressed.
+ */
+bool can_move_right_forward() {
+  return !get_right_bumper() && !get_middle_bumper();
+}
+
+
 /* - - - - - Interrupt Handlers: Begin - - - - - */
 
 
@@ -527,47 +553,4 @@ void handle_left_motor_enc_b_change() {
 }
 
 
-void handle_left_bumper_change() {
-  left_bumper = get_bumper(LEFT_BUMPER_PIN);
-
-  if (left_bumper) {
-    left_motor.Stop();
-  }
-}
-
-
-void handle_middle_bumper_change() {
-  middle_bumper = get_bumper(MIDDLE_BUMPER_PIN);
-
-  if (middle_bumper) {
-    stop();
-  }
-}
-
-
-void handle_right_bumper_change() {
-  right_bumper = get_bumper(RIGHT_BUMPER_PIN);
-
-  if (right_bumper) {
-    right_motor.Stop();
-  }
-}
-
-
 /* - - - - - Interrupt Handlers: End - - - - - */
-
-
-void stop() {
-  left_motor.Stop();
-  right_motor.Stop();
-}
-
-
-bool can_move_left_forward() {
-  return !left_bumper && !middle_bumper;
-}
-
-
-bool can_move_right_forward() {
-  return !right_bumper && !middle_bumper;
-}
