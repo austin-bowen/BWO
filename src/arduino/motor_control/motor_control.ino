@@ -159,11 +159,6 @@ class Motor {
         return;
       }
 
-      // If we want to go forward but we can't, set velocity to 0
-      if (velocity > 0 && forward_check_func != nullptr && !(*forward_check_func)()) {
-        velocity = 0;
-      }
-
       // Update the target and actual velocities
       if (acceleration == 0) {
         target_velocity = velocity;
@@ -175,6 +170,12 @@ class Motor {
           target_velocity = velocity;
         }
       }
+
+      // If we want to go forward but we can't, set target velocity to 0
+      if (target_velocity > 0 && forward_check_func != nullptr && !(*forward_check_func)()) {
+        target_velocity = 0.0;
+      }
+
       UpdateActualVelocity();
 
       if (CloseToEqual(target_velocity, 0) && !brake) {
