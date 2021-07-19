@@ -42,10 +42,6 @@ class BounceNode(Node):
 
         self._forward()
 
-    def destroy_node(self) -> bool:
-        self.get_logger().info('Destroying...')
-        return super().destroy_node()
-
     def _handle_bumpers_changed(self, bumpers: BumperState) -> None:
         if not self.is_enabled or not bumpers.any:
             return
@@ -55,12 +51,12 @@ class BounceNode(Node):
         self._forward()
 
     def _forward(self) -> None:
-        self.get_logger().debug(FORWARD)
+        self.logger.debug(FORWARD)
         self._state = FORWARD
         self._set_velocity(10, 0)
 
     def _reverse(self) -> None:
-        self.get_logger().debug(REVERSE)
+        self.logger.debug(REVERSE)
         self._state = REVERSE
 
         for _ in range(4):
@@ -68,7 +64,7 @@ class BounceNode(Node):
             time.sleep(0.5)
 
     def _turn(self, bumpers: BumperState) -> None:
-        self.get_logger().debug(TURN)
+        self.logger.debug(TURN)
         self._state = TURN
 
         LEFT = 1
@@ -119,11 +115,11 @@ def main(args=None) -> None:
 
     node = BounceNode()
 
-    print(f'[{node.get_name()}] Spinning...')
+    node.logger.info('Spinning...')
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        print(f'[{node.get_name()}] Kill signal received.')
+        node.logger.info('Kill signal received.')
     finally:
         node.destroy_node()
         rclpy.shutdown()
