@@ -27,6 +27,7 @@ setup(
             'bounce = bwo.bounce_node:main',
             'drive_motors = bwo.drive_motor_node:main',
             'follow = bwo.follow_node:main',
+            'motor_safety = bwo.motor_safety_node:main',
             'neck = bwo.neck_node:main',
             'object_detect = bwo.object_detect_node:main'
         ],
