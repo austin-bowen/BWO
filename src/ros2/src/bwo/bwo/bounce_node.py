@@ -59,7 +59,7 @@ class BounceNode(Node):
         self.logger.debug(REVERSE)
         self._state = REVERSE
 
-        for _ in range(4):
+        for _ in range(2):
             self._set_velocity(-10, 0)
             time.sleep(0.5)
 
@@ -77,7 +77,7 @@ class BounceNode(Node):
         else:
             direction = random.choice([LEFT, RIGHT])
 
-        for _ in range(4):
+        for _ in range(random.randrange(2, 8 + 1)):
             self._set_velocity(0, direction * 45)
             time.sleep(0.5)
 
