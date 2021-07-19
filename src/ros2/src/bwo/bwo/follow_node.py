@@ -2,7 +2,6 @@ import numpy as np
 import random
 import rclpy
 
-from .neck_node import PAN_CENTER, PAN_MAX
 from bwo_interfaces.msg import ObjectDetection, ObjectDetections
 from geometry_msgs.msg import Twist
 from rclpy.logging import LoggingSeverity
@@ -26,13 +25,18 @@ class FollowNode(Node):
         logger = self.get_logger()
         logger.set_level(self.LOGGER_LEVEL)
 
-        # Setup search variables
-        self._search_direction = None
+        # Setup instance variables
+        self._last_velocity = None
 
         # Setup publishers
         self._drive_motors_set_velocity_publisher = self.create_publisher(
             Twist,
-            '/drive_motors/set_velocity',
+            '/drive_motors/set_velocity/safe',
+            1
+        )
+        self._neck_pan_inc_pos_publisher = self.create_publisher(
+            Float32,
+            '/neck/pan/inc_pos',
             1
         )
 
@@ -72,12 +76,9 @@ class FollowNode(Node):
         return detections[-1] if detections else None
 
     def _search(self) -> None:
-        if not self._search_direction:
-            self._search_direction = random.choice([-1, 1])
-
-        angular_velocity = 0.33 * self._search_direction * self.MAX_ANGULAR_SPEED
-
-        self._set_velocity(0, angular_velocity)
+        # TODO: Make this better
+        self._set_velocity(linear=0, angular=0)
+        #self._inc_pan_pos(0.05 * random.uniform(-1.0, 1.0))
 
     def _follow_target(self, target: ObjectDetection) -> None:
         # Clear search stuff
@@ -98,22 +99,54 @@ class FollowNode(Node):
         else:
             linear_velocity = 0
 
+        self._set_velocity(linear=linear_velocity)
+
         # Turn to center the target
-        angular_velocity = -0.4 * center_dx * self.MAX_ANGULAR_SPEED
-
-        self._set_velocity(linear_velocity, angular_velocity)
-
-    def _set_velocity(self, linear: float, angular: float) -> None:
-        velocity = Twist()
-        velocity.linear.x = float(linear)
-        velocity.angular.z = float(angular)
-
-        self._drive_motors_set_velocity_publisher.publish(velocity)
+        self._inc_pan_pos(0.1 * center_dx)
 
     def _handle_neck_pan_pos(self, pos: Float32) -> None:
-        # Range: [-1, 1], where 0 is center, -1 is PAN_MIN, and 1 is PAN_MAX
-        d_center = (pos.data - PAN_CENTER) / (PAN_MAX - PAN_CENTER)
-        print(f'd_center = {d_center}')
+        # Rotate the body if the neck is panned too far from center
+
+        pos = pos.data
+
+        if abs(pos) >= 0.2:
+            angular_velocity = self.MAX_ANGULAR_SPEED * -pos
+        else:
+            angular_velocity = 0.0
+
+        self._set_velocity(angular=angular_velocity)
+
+    def _set_velocity(self, linear: float = None, angular: float = None) -> None:
+        velocity = Twist()
+
+        # Determine linear velocity
+        if linear is not None:
+            linear = float(linear)
+        elif self._last_velocity:
+            linear = self._last_velocity.linear.x
+        else:
+            linear = 0.0
+        velocity.linear.x = linear
+
+        # Determine angular velocity
+        if angular is not None:
+            angular = float(angular)
+        elif self._last_velocity:
+            angular = self._last_velocity.angular.z
+        else:
+            angular = 0.0
+        velocity.angular.z = angular
+
+        # Set the velocity
+        self._drive_motors_set_velocity_publisher.publish(velocity)
+
+        self._last_velocity = velocity
+
+    def _inc_pan_pos(self, inc: float) -> None:
+        message = Float32()
+        message.data = float(inc)
+        self._neck_pan_inc_pos_publisher.publish(message)
+
 
 
 def main(args=None) -> None:
