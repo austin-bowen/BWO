@@ -514,11 +514,17 @@ boolean get_right_bumper() {
 }
 
 
+/* Returns true if any of the bumpers are pressed. */
+boolean any_bumper_pressed() {
+  return get_left_bumper() || get_middle_bumper() || get_right_bumper();
+}
+
+
 /* Returns true if the left motor is allowed to move forward,
  * i.e. the left and middle bumpers are not pressed.
  */
 bool can_move_left_forward() {
-  return !get_left_bumper() && !get_middle_bumper();
+  return !any_bumper_pressed();
 }
 
 
@@ -526,7 +532,7 @@ bool can_move_left_forward() {
  * i.e. the right and middle bumpers are not pressed.
  */
 bool can_move_right_forward() {
-  return !get_right_bumper() && !get_middle_bumper();
+  return !any_bumper_pressed();
 }
 
 
